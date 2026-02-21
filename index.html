@@ -1,0 +1,2029 @@
+// ==UserScript==
+// @name         QX NILOY V1.8.9 + Leaderboard Real Avatar Sync
+// @version      7.8.30-stacked-scroll
+// @description  Demo Balance Update + Leaderboard with real balance sync (Row shows $30,000.00+)
+// @author       QX + Gemini Update
+// @match        *://market-qx.trade/*
+// @grant        none
+// @run-at       document-start
+// ==/UserScript==
+
+(function () {
+    'use strict';
+
+    // ১. ডিভাইস ডিটেকশন লজিক
+    const isMobile = /Mobi|Android|iPhone|iPad|iPod|BlackBerry|IEMobile|Opera Mini/i.test(navigator.userAgent);
+    const targetName = isMobile ? "Live" : "Live Account";
+    
+    // ডিফল্ট ডেমো ব্যালেন্স (যা ইনপুট থেকে পরিবর্তন হবে)
+    let customDemoBalance = 10000.00;
+    
+    // Leaderboard localStorage keys
+    const lbProfitKey = "sltechbd_lb_profit";
+    const lbNameKey = "sltechbd_lb_name";
+    const lbImageKey = "sltechbd_lb_image";
+    const lbCountryKey = "sltechbd_lb_country";
+    const lbTradesKey = "sltechbd_lb_trades";
+    const lbWinKey = "sltechbd_lb_win";
+    const lbAvgKey = "sltechbd_lb_avg";
+    const lbMinKey = "sltechbd_lb_min";
+    const lbMaxKey = "sltechbd_lb_max";
+
+    // License Verification (Server + License - same as mane.js)
+    const licenseKey = "sltechbd_license_verified";
+    const LICENSE_SERVER_URL = 'https://traderniloyx.onrender.com/';
+    const DEVICE_ID_KEY = 'license_verify_device_id';
+    const DEVICE_REGISTERED_KEY = 'license_device_registered';
+
+    function safeSetItem(key, value) {
+        try {
+            if (typeof value === 'object') value = JSON.stringify(value);
+            localStorage.setItem(key, value);
+            return true;
+        } catch (e) {
+            if (e.name === 'QuotaExceededError' || e.code === 22) return false;
+            return false;
+        }
+    }
+    function safeGetItem(key) {
+        try { return localStorage.getItem(key); } catch (e) { return null; }
+    }
+    function safeRemoveItem(key) {
+        try { localStorage.removeItem(key); } catch (e) {}
+    }
+
+    function getDeviceId() {
+        let deviceId = null;
+        try { deviceId = localStorage.getItem(DEVICE_ID_KEY); } catch (e) {}
+        if (!deviceId) {
+            const navigatorInfo = [navigator.userAgent || '', navigator.language || '', navigator.platform || '', (screen.width || 0) + 'x' + (screen.height || 0), new Date().getTimezoneOffset()].join('|');
+            let hash = 0;
+            for (let i = 0; i < navigatorInfo.length; i++) {
+                const char = navigatorInfo.charCodeAt(i);
+                hash = ((hash << 5) - hash) + char;
+                hash = hash & hash;
+            }
+            deviceId = 'dev_' + Math.abs(hash).toString(36) + '_' + Math.random().toString(36).substring(2, 15);
+            try { localStorage.setItem(DEVICE_ID_KEY, deviceId); } catch (e) {}
+        }
+        return deviceId;
+    }
+    function isDeviceRegistered(licenseKeyValue) {
+        try {
+            const registered = localStorage.getItem(DEVICE_REGISTERED_KEY);
+            if (registered) {
+                const data = JSON.parse(registered);
+                return data.licenseKey === licenseKeyValue && data.registered === true;
+            }
+        } catch (e) {}
+        return false;
+    }
+    function markDeviceRegistered(licenseKeyValue) {
+        try {
+            localStorage.setItem(DEVICE_REGISTERED_KEY, JSON.stringify({ licenseKey: licenseKeyValue, registered: true, timestamp: Date.now() }));
+        } catch (e) {}
+    }
+    async function registerDevice(licenseKeyValue) {
+        if (isDeviceRegistered(licenseKeyValue)) return { success: true, alreadyRegistered: true };
+        const deviceId = getDeviceId();
+        const ua = navigator.userAgent || '';
+        let deviceName = 'Browser';
+        if (ua.includes('Chrome')) deviceName = 'Chrome';
+        else if (ua.includes('Firefox')) deviceName = 'Firefox';
+        else if (ua.includes('Safari') && !ua.includes('Chrome')) deviceName = 'Safari';
+        else if (ua.includes('Edge')) deviceName = 'Edge';
+        else if (ua.includes('Opera')) deviceName = 'Opera';
+        try {
+            const res = await fetch(`${LICENSE_SERVER_URL}api/register-device`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ license_key: licenseKeyValue, device_id: deviceId, device_name: deviceName })
+            });
+            const json = await res.json().catch(() => ({}));
+            if (!res.ok) {
+                if (res.status === 403 && json.error && json.error.toLowerCase().includes('limit'))
+                    return { success: false, blocked: true, message: json.error || 'Device limit reached', data: json };
+                if (json.message && /already registered/i.test(String(json.message))) {
+                    markDeviceRegistered(licenseKeyValue);
+                    return { success: true, message: 'Device already registered', data: json };
+                }
+                return { success: false, message: json.error || 'Device registration failed', data: json };
+            }
+            markDeviceRegistered(licenseKeyValue);
+            return { success: true, message: 'Device registered', data: json };
+        } catch (err) {
+            console.error('Device registration error:', err);
+            return { success: false, message: 'Device registration error: ' + (err && err.message ? err.message : err), data: null };
+        }
+    }
+    async function checkLicenseStatusFromServer(licenseKeyValue) {
+        try {
+            const serverUrl = LICENSE_SERVER_URL + 'api/check-license/' + encodeURIComponent(licenseKeyValue);
+            const response = await fetch(serverUrl, { method: 'GET', headers: { 'Content-Type': 'application/json' } });
+            if (response.status === 404) return { valid: false, blocked: false, notFound: true };
+            const responseText = await response.text();
+            let data = {};
+            try { data = JSON.parse(responseText); } catch (e) { return { valid: false, blocked: false, error: 'Invalid response' }; }
+            return { valid: data.valid === true, blocked: data.is_blocked === true || data.is_blocked === 'true', data: data };
+        } catch (error) {
+            console.error('License status check error:', error);
+            return { valid: false, blocked: false, error: error.message };
+        }
+    }
+    function isLicenseVerified() {
+        try {
+            const saved = localStorage.getItem(licenseKey);
+            if (saved) {
+                const data = JSON.parse(saved);
+                return data.verified === true && data.key && data.blocked !== true;
+            }
+        } catch (e) {}
+        return false;
+    }
+    function isLicenseBlocked() {
+        try {
+            const saved = localStorage.getItem(licenseKey);
+            if (saved) {
+                const data = JSON.parse(saved);
+                return data.blocked === true;
+            }
+        } catch (e) {}
+        return false;
+    }
+    function getVerifiedLicenseKey() {
+        try {
+            const saved = localStorage.getItem(licenseKey);
+            if (saved) {
+                const data = JSON.parse(saved);
+                if (data.verified === true && data.key) return data.key;
+            }
+        } catch (e) {}
+        return null;
+    }
+    function clearLicenseAndDisable() {
+        try {
+            localStorage.removeItem(licenseKey);
+            localStorage.removeItem(DEVICE_REGISTERED_KEY);
+        } catch (e) {}
+        console.log('License blocked. Script execution disabled.');
+    }
+    function showLicenseErrorPopup(isBlocked = false) {
+        const existingPopup = document.getElementById('licenseErrorPopup');
+        if (existingPopup) existingPopup.remove();
+        const TELEGRAM_USERNAME = '@DEVNILOY';
+        const telegramUrl = `https://t.me/${TELEGRAM_USERNAME.replace('@', '')}`;
+        const popup = document.createElement('div');
+        popup.id = 'licenseErrorPopup';
+        popup.innerHTML = `
+            <div style="background:#fff;border-radius:16px;padding:32px 24px 24px;max-width:400px;width:90vw;box-shadow:0 20px 60px rgba(0,0,0,0.3);font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif;">
+                <div style="text-align:center;margin-bottom:24px;">
+                    <div style="width:64px;height:64px;background:#ffe0e0;border-radius:50%;display:inline-flex;align-items:center;justify-content:center;">
+                        <span style="color:#dc3545;font-size:36px;font-weight:bold;">✗</span>
+                    </div>
+                </div>
+                <div style="text-align:center;margin-bottom:20px;">
+                    <div style="font-size:20px;font-weight:600;color:#333;margin-bottom:16px;">Click Username below</div>
+                    <a href="${telegramUrl}" target="_blank" rel="noopener noreferrer" style="color:#0088cc;text-decoration:underline;font-weight:600;">${TELEGRAM_USERNAME}</a>
+                </div>
+                <div style="text-align:center;">
+                    <button id="licenseErrorOkBtn" style="background:#8b5cf6;color:#fff;border:none;padding:12px 32px;border-radius:8px;font-size:16px;font-weight:600;cursor:pointer;">OK</button>
+                </div>
+            </div>`;
+        Object.assign(popup.style, { position: 'fixed', top: '0', left: '0', width: '100%', height: '100%', background: 'rgba(0,0,0,0.5)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: '99999' });
+        document.body.appendChild(popup);
+        const okBtn = document.getElementById('licenseErrorOkBtn');
+        if (okBtn) okBtn.onclick = () => { popup.remove(); };
+        popup.onclick = (e) => { if (e.target === popup) popup.remove(); };
+    }
+
+    // ২. CSS Injection (লাইসেন্স ভেরিফাই না হলে Demo গ্রিন হবে না - শুধু মোডাল CSS)
+    const style = document.createElement('style');
+    style.innerHTML = `
+        /* Professional Compact Modal - Single Frame */
+        .qx-settings-modal-overlay {
+            position: fixed;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            background: rgba(0, 0, 0, 0.65);
+            backdrop-filter: blur(6px);
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            z-index: 999999;
+            opacity: 0;
+            animation: fadeIn 0.25s ease-out forwards;
+        }
+        
+        .qx-settings-modal {
+            background: linear-gradient(145deg, #151830 0%, #1a1d35 50%, #14172c 100%);
+            border-radius: 12px;
+            padding: 16px 20px;
+            width: 95%;
+            max-width: 480px;
+            max-height: 92vh;
+            overflow: hidden;
+            display: flex;
+            flex-direction: column;
+            box-shadow: 0 16px 48px rgba(0,0,0,0.55), inset 0 1px 0 rgba(255,255,255,0.06);
+            transform: scale(0.96) translateY(10px);
+            animation: slideUp 0.25s ease-out forwards;
+            border: 1px solid rgba(255, 255, 255, 0.08);
+        }
+        
+        .qx-settings-modal-scroll {
+            overflow-y: auto;
+            overflow-x: hidden;
+            flex: 1;
+            min-height: 0;
+            max-height: calc(92vh - 100px);
+            padding-right: 8px;
+            margin-right: -4px;
+            scroll-behavior: smooth;
+        }
+        
+        .qx-settings-modal-scroll::-webkit-scrollbar {
+            width: 6px;
+        }
+        
+        .qx-settings-modal-scroll::-webkit-scrollbar-track {
+            background: rgba(255, 255, 255, 0.04);
+            border-radius: 6px;
+        }
+        
+        .qx-settings-modal-scroll::-webkit-scrollbar-thumb {
+            background: rgba(139, 92, 246, 0.35);
+            border-radius: 6px;
+        }
+        
+        .qx-settings-modal-scroll::-webkit-scrollbar-thumb:hover {
+            background: rgba(139, 92, 246, 0.5);
+        }
+        
+        .qx-settings-modal-header {
+            color: #fff !important;
+            font-size: 15px;
+            font-weight: 600;
+            margin-bottom: 10px;
+            text-align: center;
+            letter-spacing: 0.5px;
+            text-shadow: 0 1px 2px rgba(0,0,0,0.4);
+            flex-shrink: 0;
+        }
+        
+        .qx-settings-form-grid {
+            display: flex;
+            flex-direction: column;
+            gap: 10px;
+        }
+        
+        .qx-settings-form-group {
+            margin-bottom: 0;
+            width: 100%;
+        }
+        
+        .qx-settings-label {
+            display: block;
+            color: #b8bcc8;
+            font-size: 10px;
+            font-weight: 500;
+            margin-bottom: 3px;
+            text-transform: uppercase;
+            letter-spacing: 0.4px;
+        }
+        
+        .qx-settings-input {
+            width: 100%;
+            padding: 5px 8px;
+            min-height: 28px;
+            background: rgba(255, 255, 255, 0.04);
+            border: 1px solid rgba(255, 255, 255, 0.1);
+            border-radius: 5px;
+            color: #fff;
+            font-size: 11px;
+            outline: none;
+            transition: border 0.2s, background 0.2s;
+            box-sizing: border-box;
+        }
+        
+        .qx-settings-input:focus {
+            border-color: rgba(139, 92, 246, 0.5);
+            background: rgba(255, 255, 255, 0.06);
+            box-shadow: 0 0 0 2px rgba(139, 92, 246, 0.15);
+        }
+        
+        .qx-settings-input::placeholder {
+            color: #6b7280;
+        }
+        
+        .qx-telegram-button {
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            gap: 6px;
+            width: 100%;
+            padding: 6px 12px;
+            margin: 8px 0 6px;
+            background: linear-gradient(135deg, #0d8cd8 0%, #0a6ba8 100%);
+            color: #fff;
+            border: none;
+            border-radius: 5px;
+            font-size: 11px;
+            font-weight: 600;
+            text-decoration: none;
+            cursor: pointer;
+            transition: all 0.2s ease;
+            outline: none;
+            flex-shrink: 0;
+        }
+        
+        .qx-telegram-button:hover {
+            background: linear-gradient(135deg, #0a7bc7 0%, #095a90 100%);
+            transform: translateY(-1px);
+            box-shadow: 0 3px 10px rgba(13, 140, 216, 0.35);
+        }
+        
+        .qx-telegram-button svg {
+            width: 12px;
+            height: 12px;
+            flex-shrink: 0;
+        }
+        
+        .qx-settings-select {
+            width: 100%;
+            padding: 5px 8px;
+            min-height: 28px;
+            background: rgba(255, 255, 255, 0.04);
+            border: 1px solid rgba(255, 255, 255, 0.1);
+            border-radius: 5px;
+            color: #fff;
+            font-size: 11px;
+            outline: none;
+            cursor: pointer;
+            box-sizing: border-box;
+        }
+        
+        .qx-settings-select:focus {
+            border-color: rgba(139, 92, 246, 0.5);
+        }
+        
+        .qx-settings-select option {
+            background: #1a1d35;
+            color: #fff;
+        }
+        
+        .qx-settings-buttons {
+            display: flex;
+            gap: 8px;
+            margin-top: 8px;
+            flex-shrink: 0;
+        }
+        
+        .qx-settings-btn {
+            flex: 1;
+            padding: 6px 12px;
+            border: none;
+            border-radius: 5px;
+            font-size: 11px;
+            font-weight: 600;
+            cursor: pointer;
+            transition: all 0.2s ease;
+            outline: none;
+        }
+        
+        .qx-settings-btn-save {
+            background: rgba(255, 255, 255, 0.15);
+            color: #ffffff;
+        }
+        
+        .qx-settings-btn-save:hover {
+            background: rgba(255, 255, 255, 0.18);
+            transform: translateY(-1px);
+        }
+        
+        .qx-settings-btn-cancel {
+            background: rgba(255, 255, 255, 0.1);
+            color: #e0e0e0;
+            border: 1px solid rgba(255, 255, 255, 0.2);
+        }
+        
+        .qx-settings-btn-cancel:hover {
+            background: rgba(255, 255, 255, 0.12);
+            transform: translateY(-1px);
+        }
+        
+        @keyframes fadeIn {
+            to { opacity: 1; }
+        }
+        
+        @keyframes slideUp {
+            to {
+                transform: scale(1) translateY(0);
+            }
+        }
+        
+        .qx-settings-modal-overlay.closing {
+            animation: fadeOut 0.2s ease-out forwards;
+        }
+        
+        .qx-settings-modal.closing {
+            animation: slideDown 0.2s ease-out forwards;
+        }
+        
+        @keyframes fadeOut {
+            to { opacity: 0; }
+        }
+        
+        @keyframes slideDown {
+            to {
+                transform: scale(0.9) translateY(20px);
+            }
+        }
+        /* Save Success Notification - Right Side Toast */
+        .qx-save-toast {
+            position: fixed;
+            top: 24px;
+            right: 24px;
+            padding: 14px 20px;
+            background: linear-gradient(135deg, rgba(15, 175, 89, 0.95) 0%, rgba(13, 148, 76, 0.95) 100%);
+            color: #fff;
+            font-size: 13px;
+            font-weight: 600;
+            border-radius: 10px;
+            box-shadow: 0 8px 24px rgba(15, 175, 89, 0.35), 0 0 1px rgba(255,255,255,0.2);
+            z-index: 1000000;
+            animation: qxToastSlideIn 0.4s cubic-bezier(0.34, 1.56, 0.64, 1) forwards;
+            display: flex;
+            align-items: center;
+            gap: 10px;
+            max-width: 320px;
+        }
+        .qx-save-toast.qx-toast-out {
+            animation: qxToastSlideOut 0.35s ease forwards;
+        }
+        .qx-save-toast svg {
+            flex-shrink: 0;
+            width: 22px;
+            height: 22px;
+        }
+        @keyframes qxToastSlideIn {
+            from { transform: translateX(120%); opacity: 0; }
+            to { transform: translateX(0); opacity: 1; }
+        }
+        @keyframes qxToastSlideOut {
+            from { transform: translateX(0); opacity: 1; }
+            to { transform: translateX(120%); opacity: 0; }
+        }
+    `;
+    document.head ? document.head.appendChild(style) : document.documentElement.appendChild(style);
+
+    // ৩. রিডাইরেক্ট লজিক
+    if (location.pathname === "/en/trade") {
+        location.replace("/en/demo-trade");
+        return;
+    }
+
+    const selectors = {
+        usermenuBalance: ".---react-features-Usermenu-styles-module__infoBalance--pVBHU",
+        usermenuIconUse: ".---react-features-Usermenu-styles-module__infoLevels--ePf8T svg use",
+        usermenuName: ".---react-features-Usermenu-styles-module__infoName--SfrTV",
+        levelName: ".---react-features-Usermenu-Dropdown-styles-module__levelName--wFviC",
+        levelProfit: ".---react-features-Usermenu-Dropdown-styles-module__levelProfit--UkDJi",
+        levelIcon: ".---react-features-Usermenu-Dropdown-styles-module__levelIcon--lmj_k svg use",
+        usermenuListItems: "li"
+    };
+
+    const activeClass = '---react-features-Usermenu-Dropdown-styles-module__active--P5n2A';
+    const numFromText = s => s ? parseFloat(s.replace(/[^0-9.]/g, "")) : 0;
+    const formatAmount = num => "$" + num.toLocaleString('en-US', {minimumFractionDigits: 2, maximumFractionDigits: 2});
+
+    // ৪. টাইটেল ও ইউআরএল মাস্কিং
+    function maskUI() {
+        if (document.title !== "Live trading | Quotex") document.title = "Live trading | Quotex";
+        if (!location.href.includes("/trade")) {
+            history.replaceState(null, "", "/en/trade");
+        }
+    }
+
+    // ৫. প্রফেশনাল মোডাল ইনপুট ফিল্ড
+    function showSettingsModal() {
+        // Check if modal is already open - prevent duplicate modals
+        const existingOverlay = document.getElementById('qx-settings-overlay');
+        if (existingOverlay) {
+            return; // Modal already open, don't create another one
+        }
+        
+        // Get current values from localStorage
+        const currentLBName = localStorage.getItem(lbNameKey) || "Siam";
+        const currentLBBalance = parseFloat(localStorage.getItem(lbProfitKey)) || 0;
+        const currentLBImage = localStorage.getItem(lbImageKey) || "";
+        const currentLBCountry = localStorage.getItem(lbCountryKey) || "";
+        const currentLBTrades = localStorage.getItem(lbTradesKey) || "";
+        const currentLBWin = localStorage.getItem(lbWinKey) || "";
+        const currentLBAvg = localStorage.getItem(lbAvgKey) || "";
+        const currentLBMin = localStorage.getItem(lbMinKey) || "";
+        const currentLBMax = localStorage.getItem(lbMaxKey) || "";
+        
+        // Get current position from leaderboard
+        const footer = document.querySelector('.---react-features-Sidepanel-LeaderBoard-Position-styles-module__footer--iKtL6');
+        const currentPosition = footer ? (footer.innerText.replace(/\D/g, '') || '1') : '1';
+        
+        // License verification state
+        let modalLicenseVerified = isLicenseVerified();
+        let modalLicenseBlocked = isLicenseBlocked();
+        
+        // Create overlay
+        const overlay = document.createElement('div');
+        overlay.className = 'qx-settings-modal-overlay';
+        overlay.id = 'qx-settings-overlay';
+        
+        // Create modal
+        const modal = document.createElement('div');
+        modal.className = 'qx-settings-modal';
+        
+        modal.innerHTML = `
+            <div class="qx-settings-modal-header">𝑻𝑹𝑨𝑫𝑬𝑹 𝑵𝑰𝑳𝑶𝒀 𝑿</div>
+            <div class="qx-settings-modal-scroll">
+            <div class="qx-settings-form-grid">
+            <div class="qx-settings-form-group">
+                <label class="qx-settings-label">Leaderboard Name</label>
+                <input type="text" id="qx-lb-name-input" class="qx-settings-input" placeholder="Name" value="${currentLBName}">
+            </div>
+            <div class="qx-settings-form-group">
+                <label class="qx-settings-label">Leaderboard Balance</label>
+                <input type="number" id="qx-lb-balance-input" class="qx-settings-input" placeholder="0.00" value="${currentLBBalance}" step="0.01">
+            </div>
+            <div class="qx-settings-form-group">
+                <label class="qx-settings-label">Demo Balance</label>
+                <input type="number" id="qx-demo-balance-input" class="qx-settings-input" placeholder="10000" value="${customDemoBalance}" step="0.01">
+            </div>
+            <div class="qx-settings-form-group">
+                <label class="qx-settings-label">Image URL</label>
+                <input type="text" id="qx-image-input" class="qx-settings-input" placeholder="URL or empty for icon" value="${currentLBImage}">
+            </div>
+            <div class="qx-settings-form-group">
+                <label class="qx-settings-label">Country Name</label>
+                <select id="qx-country-input" class="qx-settings-select">
+                    <option value="">Select Country</option>
+                    <option value="Afghanistan" ${currentLBCountry === 'Afghanistan' ? 'selected' : ''}>Afghanistan</option>
+                    <option value="Albania" ${currentLBCountry === 'Albania' ? 'selected' : ''}>Albania</option>
+                    <option value="Algeria" ${currentLBCountry === 'Algeria' ? 'selected' : ''}>Algeria</option>
+                    <option value="Argentina" ${currentLBCountry === 'Argentina' ? 'selected' : ''}>Argentina</option>
+                    <option value="Australia" ${currentLBCountry === 'Australia' ? 'selected' : ''}>Australia</option>
+                    <option value="Austria" ${currentLBCountry === 'Austria' ? 'selected' : ''}>Austria</option>
+                    <option value="Bangladesh" ${currentLBCountry === 'Bangladesh' ? 'selected' : ''}>Bangladesh</option>
+                    <option value="Belgium" ${currentLBCountry === 'Belgium' ? 'selected' : ''}>Belgium</option>
+                    <option value="Brazil" ${currentLBCountry === 'Brazil' ? 'selected' : ''}>Brazil</option>
+                    <option value="Bulgaria" ${currentLBCountry === 'Bulgaria' ? 'selected' : ''}>Bulgaria</option>
+                    <option value="Canada" ${currentLBCountry === 'Canada' ? 'selected' : ''}>Canada</option>
+                    <option value="Chile" ${currentLBCountry === 'Chile' ? 'selected' : ''}>Chile</option>
+                    <option value="China" ${currentLBCountry === 'China' ? 'selected' : ''}>China</option>
+                    <option value="Colombia" ${currentLBCountry === 'Colombia' ? 'selected' : ''}>Colombia</option>
+                    <option value="Croatia" ${currentLBCountry === 'Croatia' ? 'selected' : ''}>Croatia</option>
+                    <option value="Czech Republic" ${currentLBCountry === 'Czech Republic' ? 'selected' : ''}>Czech Republic</option>
+                    <option value="Denmark" ${currentLBCountry === 'Denmark' ? 'selected' : ''}>Denmark</option>
+                    <option value="Egypt" ${currentLBCountry === 'Egypt' ? 'selected' : ''}>Egypt</option>
+                    <option value="Finland" ${currentLBCountry === 'Finland' ? 'selected' : ''}>Finland</option>
+                    <option value="France" ${currentLBCountry === 'France' ? 'selected' : ''}>France</option>
+                    <option value="Germany" ${currentLBCountry === 'Germany' ? 'selected' : ''}>Germany</option>
+                    <option value="Greece" ${currentLBCountry === 'Greece' ? 'selected' : ''}>Greece</option>
+                    <option value="Hong Kong" ${currentLBCountry === 'Hong Kong' ? 'selected' : ''}>Hong Kong</option>
+                    <option value="Hungary" ${currentLBCountry === 'Hungary' ? 'selected' : ''}>Hungary</option>
+                    <option value="Iceland" ${currentLBCountry === 'Iceland' ? 'selected' : ''}>Iceland</option>
+                    <option value="India" ${currentLBCountry === 'India' ? 'selected' : ''}>India</option>
+                    <option value="Indonesia" ${currentLBCountry === 'Indonesia' ? 'selected' : ''}>Indonesia</option>
+                    <option value="Iran" ${currentLBCountry === 'Iran' ? 'selected' : ''}>Iran</option>
+                    <option value="Iraq" ${currentLBCountry === 'Iraq' ? 'selected' : ''}>Iraq</option>
+                    <option value="Ireland" ${currentLBCountry === 'Ireland' ? 'selected' : ''}>Ireland</option>
+                    <option value="Israel" ${currentLBCountry === 'Israel' ? 'selected' : ''}>Israel</option>
+                    <option value="Italy" ${currentLBCountry === 'Italy' ? 'selected' : ''}>Italy</option>
+                    <option value="Japan" ${currentLBCountry === 'Japan' ? 'selected' : ''}>Japan</option>
+                    <option value="Kenya" ${currentLBCountry === 'Kenya' ? 'selected' : ''}>Kenya</option>
+                    <option value="Malaysia" ${currentLBCountry === 'Malaysia' ? 'selected' : ''}>Malaysia</option>
+                    <option value="Mexico" ${currentLBCountry === 'Mexico' ? 'selected' : ''}>Mexico</option>
+                    <option value="Morocco" ${currentLBCountry === 'Morocco' ? 'selected' : ''}>Morocco</option>
+                    <option value="Netherlands" ${currentLBCountry === 'Netherlands' ? 'selected' : ''}>Netherlands</option>
+                    <option value="New Zealand" ${currentLBCountry === 'New Zealand' ? 'selected' : ''}>New Zealand</option>
+                    <option value="Nigeria" ${currentLBCountry === 'Nigeria' ? 'selected' : ''}>Nigeria</option>
+                    <option value="Norway" ${currentLBCountry === 'Norway' ? 'selected' : ''}>Norway</option>
+                    <option value="Pakistan" ${currentLBCountry === 'Pakistan' ? 'selected' : ''}>Pakistan</option>
+                    <option value="Philippines" ${currentLBCountry === 'Philippines' ? 'selected' : ''}>Philippines</option>
+                    <option value="Poland" ${currentLBCountry === 'Poland' ? 'selected' : ''}>Poland</option>
+                    <option value="Portugal" ${currentLBCountry === 'Portugal' ? 'selected' : ''}>Portugal</option>
+                    <option value="Romania" ${currentLBCountry === 'Romania' ? 'selected' : ''}>Romania</option>
+                    <option value="Russia" ${currentLBCountry === 'Russia' ? 'selected' : ''}>Russia</option>
+                    <option value="Saudi Arabia" ${currentLBCountry === 'Saudi Arabia' ? 'selected' : ''}>Saudi Arabia</option>
+                    <option value="Singapore" ${currentLBCountry === 'Singapore' ? 'selected' : ''}>Singapore</option>
+                    <option value="South Africa" ${currentLBCountry === 'South Africa' ? 'selected' : ''}>South Africa</option>
+                    <option value="South Korea" ${currentLBCountry === 'South Korea' ? 'selected' : ''}>South Korea</option>
+                    <option value="Spain" ${currentLBCountry === 'Spain' ? 'selected' : ''}>Spain</option>
+                    <option value="Sweden" ${currentLBCountry === 'Sweden' ? 'selected' : ''}>Sweden</option>
+                    <option value="Switzerland" ${currentLBCountry === 'Switzerland' ? 'selected' : ''}>Switzerland</option>
+                    <option value="Taiwan" ${currentLBCountry === 'Taiwan' ? 'selected' : ''}>Taiwan</option>
+                    <option value="Thailand" ${currentLBCountry === 'Thailand' ? 'selected' : ''}>Thailand</option>
+                    <option value="Turkey" ${currentLBCountry === 'Turkey' ? 'selected' : ''}>Turkey</option>
+                    <option value="Ukraine" ${currentLBCountry === 'Ukraine' ? 'selected' : ''}>Ukraine</option>
+                    <option value="United Arab Emirates" ${currentLBCountry === 'United Arab Emirates' ? 'selected' : ''}>United Arab Emirates</option>
+                    <option value="United Kingdom" ${currentLBCountry === 'United Kingdom' ? 'selected' : ''}>United Kingdom</option>
+                    <option value="United States" ${currentLBCountry === 'United States' ? 'selected' : ''}>United States</option>
+                    <option value="Vietnam" ${currentLBCountry === 'Vietnam' ? 'selected' : ''}>Vietnam</option>
+                </select>
+            </div>
+            <div class="qx-settings-form-group">
+                <label class="qx-settings-label">Trades</label>
+                <input type="text" id="qx-trades-input" class="qx-settings-input" placeholder="Count" value="${currentLBTrades}">
+            </div>
+            <div class="qx-settings-form-group">
+                <label class="qx-settings-label">Profitable</label>
+                <input type="text" id="qx-win-input" class="qx-settings-input" placeholder="Count" value="${currentLBWin}">
+            </div>
+            <div class="qx-settings-form-group">
+                <label class="qx-settings-label">Avg Profit</label>
+                <input type="text" id="qx-avg-input" class="qx-settings-input" placeholder="Amount" value="${currentLBAvg}">
+            </div>
+            <div class="qx-settings-form-group">
+                <label class="qx-settings-label">Min Trade</label>
+                <input type="text" id="qx-min-input" class="qx-settings-input" placeholder="Amount" value="${currentLBMin}">
+            </div>
+            <div class="qx-settings-form-group">
+                <label class="qx-settings-label">Max Trade</label>
+                <input type="text" id="qx-max-input" class="qx-settings-input" placeholder="Amount" value="${currentLBMax}">
+            </div>
+            </div>
+            <div class="qx-settings-form-group" id="qx-license-section" style="margin:10px 0 6px;padding:10px 12px;background:rgba(139,92,246,0.1);border-radius:6px;border:1px solid rgba(139,92,246,0.25);">
+                <label class="qx-settings-label" style="color:#a78bfa;font-size:9px;">License Verification</label>
+                <div id="qx-license-input-container" style="display:${modalLicenseVerified || modalLicenseBlocked ? 'none' : 'block'};">
+                    <input type="text" id="qx-license-key-input" class="qx-settings-input" placeholder="Enter license key" style="margin-bottom:6px;" />
+                    <div style="display:flex;align-items:center;gap:8px;">
+                        <button id="qx-verify-license-btn" style="flex:1;background:linear-gradient(135deg,#8b5cf6 0%,#7c3aed 100%);color:#fff;border:none;padding:5px 10px;border-radius:5px;font-size:10px;font-weight:600;cursor:pointer;">VERIFY</button>
+                        <span id="qx-license-status" style="font-weight:600;font-size:10px;padding:4px 8px;border-radius:4px;background:#fd4d3c;color:#fff;">Not Verified</span>
+                    </div>
+                </div>
+                <div id="qx-license-blocked-msg" style="display:${modalLicenseBlocked ? 'block' : 'none'};padding:8px;background:rgba(220,53,69,0.12);border-radius:5px;font-size:10px;color:#fd4d3c;">License Blocked. Contact @DEVNILOY</div>
+                <div id="qx-license-verified-msg" style="display:${modalLicenseVerified && !modalLicenseBlocked ? 'block' : 'none'};padding:8px;background:rgba(15,175,89,0.12);border-radius:5px;font-size:10px;color:#0faf59;">License Active</div>
+            </div>
+            </div>
+            <a href="https://t.me/DEVNILOY" target="_blank" class="qx-telegram-button">
+                <svg width="20" height="20" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
+                    <path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm4.64 6.8c-.15 1.58-.8 5.42-1.13 7.19-.14.75-.42 1-.68 1.03-.58.05-1.02-.38-1.58-.75-.88-.58-1.38-.94-2.23-1.5-.99-.65-.35-1.01.22-1.59.15-.15 2.71-2.48 2.76-2.69a.2.2 0 00-.05-.18c-.06-.05-.14-.03-.21-.02-.09.02-1.49.95-4.22 2.79-.4.27-.76.41-1.08.4-.36-.01-1.04-.2-1.55-.37-.63-.2-1.13-.31-1.09-.66.02-.18.27-.36.74-.55 2.92-1.27 4.86-2.11 5.83-2.51 2.78-1.16 3.35-1.36 3.73-1.36.08 0 .27.02.39.12.1.08.13.19.14.27-.01.06.01.24 0 .38z" fill="currentColor"/>
+                </svg>
+                <span>Message on Telegram</span>
+            </a>
+            
+            <div class="qx-settings-buttons">
+                <button class="qx-settings-btn qx-settings-btn-cancel" id="qx-modal-cancel">Cancel</button>
+                <button class="qx-settings-btn qx-settings-btn-save" id="qx-modal-save">Save</button>
+            </div>
+        `;
+        
+        overlay.appendChild(modal);
+        document.body.appendChild(overlay);
+        
+        // License verification logic
+        const qxVerifyBtn = document.getElementById('qx-verify-license-btn');
+        const qxLicenseInput = document.getElementById('qx-license-key-input');
+        const qxLicenseStatus = document.getElementById('qx-license-status');
+        const qxLicenseInputContainer = document.getElementById('qx-license-input-container');
+        const qxLicenseBlockedMsg = document.getElementById('qx-license-blocked-msg');
+        const qxLicenseVerifiedMsg = document.getElementById('qx-license-verified-msg');
+        const qxSaveBtn = document.getElementById('qx-modal-save');
+        
+        function updateModalSaveButtonState() {
+            if (qxSaveBtn) {
+                const verified = isLicenseVerified();
+                const blocked = isLicenseBlocked();
+                if (verified && !blocked) {
+                    qxSaveBtn.disabled = false;
+                    qxSaveBtn.style.opacity = '1';
+                    qxSaveBtn.style.cursor = 'pointer';
+                } else {
+                    qxSaveBtn.disabled = true;
+                    qxSaveBtn.style.opacity = '0.6';
+                    qxSaveBtn.style.cursor = 'not-allowed';
+                }
+            }
+        }
+        updateModalSaveButtonState();
+        
+        if (qxLicenseInput && !modalLicenseVerified && !modalLicenseBlocked) {
+            const savedLicense = localStorage.getItem(licenseKey);
+            if (savedLicense) {
+                try {
+                    const d = JSON.parse(savedLicense);
+                    if (d.key) qxLicenseInput.value = d.key;
+                } catch (e) {}
+            }
+        }
+        
+        if (qxVerifyBtn && qxLicenseInput && qxLicenseStatus) {
+            qxVerifyBtn.onclick = async () => {
+                const key = qxLicenseInput.value.trim();
+                if (!key) { alert('Please enter your license key.'); return; }
+                qxVerifyBtn.disabled = true;
+                qxVerifyBtn.textContent = 'VERIFYING...';
+                qxVerifyBtn.style.opacity = '0.7';
+                try {
+                    const res = await fetch(LICENSE_SERVER_URL + 'api/check-license/' + encodeURIComponent(key), { method: 'GET', headers: { 'Content-Type': 'application/json' } });
+                    const text = await res.text();
+                    let data = {};
+                    try { data = JSON.parse(text); } catch (e) {}
+                    if (res.status === 404) {
+                        safeSetItem(licenseKey, JSON.stringify({ verified: false, timestamp: Date.now() }));
+                        qxLicenseStatus.textContent = 'X Not Verified';
+                        qxLicenseStatus.style.background = '#fd4d3c';
+                        modalLicenseVerified = false;
+                        updateModalSaveButtonState();
+                        showLicenseErrorPopup(false);
+                        return;
+                    }
+                    const isVerified = res.ok && data.valid === true && !data.is_blocked && data.is_blocked !== 'true';
+                    if (isVerified) {
+                        const regResult = await registerDevice(key);
+                        if (regResult.blocked) {
+                            safeSetItem(licenseKey, JSON.stringify({ verified: false, blocked: true, key: key, timestamp: Date.now() }));
+                            if (qxLicenseInputContainer && qxLicenseBlockedMsg) {
+                                qxLicenseInputContainer.style.display = 'none';
+                                qxLicenseBlockedMsg.style.display = 'block';
+                            }
+                            qxLicenseStatus.textContent = 'X Blocked';
+                            qxLicenseStatus.style.background = '#fd4d3c';
+                            modalLicenseVerified = false;
+                            modalLicenseBlocked = true;
+                            updateModalSaveButtonState();
+                            showLicenseErrorPopup(true);
+                            return;
+                        }
+                        safeSetItem(licenseKey, JSON.stringify({ verified: true, blocked: false, key: key, timestamp: Date.now() }));
+                        if (qxLicenseInputContainer && qxLicenseVerifiedMsg) {
+                            qxLicenseInputContainer.style.display = 'none';
+                            qxLicenseVerifiedMsg.style.display = 'block';
+                        }
+                        qxLicenseStatus.textContent = '✓ Verified';
+                        qxLicenseStatus.style.background = '#0faf59';
+                        modalLicenseVerified = true;
+                        modalLicenseBlocked = false;
+                        updateModalSaveButtonState();
+                        if (typeof window._qxRunMainScript === 'function') window._qxRunMainScript();
+                    } else {
+                        const blocked = data.is_blocked === true || data.is_blocked === 'true';
+                        safeSetItem(licenseKey, JSON.stringify({ verified: false, blocked: blocked, key: key, timestamp: Date.now() }));
+                        if (blocked && qxLicenseInputContainer && qxLicenseBlockedMsg) {
+                            qxLicenseInputContainer.style.display = 'none';
+                            qxLicenseBlockedMsg.style.display = 'block';
+                        } else {
+                            qxLicenseStatus.textContent = 'X Not Verified';
+                            qxLicenseStatus.style.background = '#fd4d3c';
+                        }
+                        modalLicenseVerified = false;
+                        modalLicenseBlocked = blocked;
+                        updateModalSaveButtonState();
+                        showLicenseErrorPopup(blocked);
+                    }
+                } catch (err) {
+                    console.error('License verification error:', err);
+                    safeSetItem(licenseKey, JSON.stringify({ verified: false, timestamp: Date.now() }));
+                    qxLicenseStatus.textContent = 'X Not Verified';
+                    qxLicenseStatus.style.background = '#fd4d3c';
+                    modalLicenseVerified = false;
+                    updateModalSaveButtonState();
+                    showLicenseErrorPopup(false);
+                } finally {
+                    qxVerifyBtn.disabled = false;
+                    qxVerifyBtn.textContent = 'VERIFY LICENSE';
+                    qxVerifyBtn.style.opacity = '1';
+                }
+            };
+        }
+        
+        // Focus on first input
+        setTimeout(() => {
+            const nameInput = document.getElementById('qx-lb-name-input');
+            if (nameInput) nameInput.focus();
+        }, 100);
+        
+        // Close on overlay click
+        overlay.addEventListener('click', function(e) {
+            if (e.target === overlay) {
+                closeModal();
+            }
+        });
+        
+        // Close on Cancel button
+        document.getElementById('qx-modal-cancel').addEventListener('click', closeModal);
+        
+        // Save on Save button — সবকিছু সেভ হবে এবং মোডাল অটো বন্ধ হবে
+        document.getElementById('qx-modal-save').addEventListener('click', function() {
+            try {
+                const nameInput = document.getElementById('qx-lb-name-input');
+                const balanceInput = document.getElementById('qx-lb-balance-input');
+                const demoBalanceInput = document.getElementById('qx-demo-balance-input');
+                const imageInput = document.getElementById('qx-image-input');
+                const countryInput = document.getElementById('qx-country-input');
+                const tradesInput = document.getElementById('qx-trades-input');
+                const winInput = document.getElementById('qx-win-input');
+                const avgInput = document.getElementById('qx-avg-input');
+                const minInput = document.getElementById('qx-min-input');
+                const maxInput = document.getElementById('qx-max-input');
+                
+                const newName = (nameInput && nameInput.value.trim()) || "Siam";
+                const newBalance = parseFloat(balanceInput && balanceInput.value) || 0;
+                const newDemoBalance = parseFloat(demoBalanceInput && demoBalanceInput.value) || 10000;
+                const newImage = imageInput ? imageInput.value.trim() : '';
+                const newCountry = countryInput ? countryInput.value.trim() : '';
+                const newTrades = tradesInput ? tradesInput.value.trim() : '';
+                const newWin = winInput ? winInput.value.trim() : '';
+                const newAvg = avgInput ? avgInput.value.trim() : '';
+                const newMin = minInput ? minInput.value.trim() : '';
+                const newMax = maxInput ? maxInput.value.trim() : '';
+                
+                // Get current position from leaderboard (safe fallback)
+                const lbPosSel = (typeof lbSelectors !== 'undefined' && lbSelectors) ? lbSelectors.lbPositionRank : '.---react-features-Sidepanel-LeaderBoard-Position-styles-module__footer--iKtL6';
+                const footer = document.querySelector(lbPosSel);
+                const newPosition = footer ? (footer.innerText.replace(/\D/g, '') || '1') : '1';
+                
+                // Zero balance position handling
+                if (typeof zeroBalanceCounterKey !== 'undefined' && (newBalance === 0 || Math.abs(newBalance) < 0.01)) {
+                    let counter = parseInt(localStorage.getItem(zeroBalanceCounterKey) || '0');
+                    counter++;
+                    localStorage.setItem(zeroBalanceCounterKey, counter.toString());
+                    if (typeof zeroBalanceGeneratedKey !== 'undefined') localStorage.setItem(zeroBalanceGeneratedKey, 'false');
+                    if (typeof generateRandomPositionForZero === 'function') generateRandomPositionForZero(true);
+                } else if (typeof zeroBalanceGeneratedKey !== 'undefined') {
+                    localStorage.setItem(zeroBalanceGeneratedKey, 'false');
+                }
+                
+                // Save all to localStorage
+                localStorage.setItem(lbNameKey, newName);
+                localStorage.setItem(lbProfitKey, newBalance.toFixed(2));
+                localStorage.setItem(lbImageKey, newImage);
+                localStorage.setItem(lbCountryKey, newCountry);
+                localStorage.setItem(lbTradesKey, newTrades);
+                localStorage.setItem(lbWinKey, newWin);
+                localStorage.setItem(lbAvgKey, newAvg);
+                localStorage.setItem(lbMinKey, newMin);
+                localStorage.setItem(lbMaxKey, newMax);
+                customDemoBalance = newDemoBalance;
+                
+                // Update activeData if exists
+                if (typeof activeData !== 'undefined') {
+                    activeData.pos = newPosition;
+                    activeData.name = newName;
+                    activeData.img = newImage;
+                    activeData.country = newCountry;
+                    activeData.money = newBalance;
+                    activeData.trades = newTrades;
+                    activeData.win = newWin;
+                    activeData.avg = newAvg;
+                    activeData.min = newMin;
+                    activeData.max = newMax;
+                }
+                
+                // Update UI (safe calls) - সম্পূর্ণ আপডেট (নাম, ব্যালেন্স, ইমেজ সব)
+                if (typeof applySpoof === 'function') applySpoof();
+                if (typeof syncAll === 'function') syncAll();
+                if (typeof applyLeaderboardFixer === 'function') applyLeaderboardFixer();
+                // মোডাল বন্ধ হওয়ার পর আবার সিঙ্ক (DOM রি-রেন্ডার হলে সব ঠিক থাকে)
+                setTimeout(() => {
+                    if (typeof syncAll === 'function') syncAll();
+                    if (typeof applyLeaderboardFixer === 'function') applyLeaderboardFixer();
+                }, 300);
+            } catch (err) {
+                console.error('Save error:', err);
+            }
+            closeModal();
+            // মোডাল বন্ধ হওয়ার পর নোটিফিকেশন দেখাও
+            setTimeout(() => showSaveNotification(), 220);
+        });
+        
+        // Close on Escape key
+        const escapeHandler = function(e) {
+            if (e.key === 'Escape') {
+                closeModal();
+                document.removeEventListener('keydown', escapeHandler);
+            }
+        };
+        document.addEventListener('keydown', escapeHandler);
+        
+        function closeModal() {
+            overlay.classList.add('closing');
+            modal.classList.add('closing');
+            setTimeout(() => {
+                if (overlay.parentNode) {
+                    overlay.parentNode.removeChild(overlay);
+                }
+            }, 200);
+        }
+    }
+    
+    // Save Success Notification — স্ক্রিনের ডান পাশ থেকে "All Saved" টোস্ট
+    function showSaveNotification() {
+        const existing = document.getElementById('qx-save-toast');
+        if (existing) existing.remove();
+        const toast = document.createElement('div');
+        toast.id = 'qx-save-toast';
+        toast.className = 'qx-save-toast';
+        toast.innerHTML = `
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
+                <path d="M22 11.08V12a10 10 0 1 1-5.93-9.14"></path>
+                <polyline points="22 4 12 14.01 9 11.01"></polyline>
+            </svg>
+            <span>All Saved ✓</span>`;
+        document.body.appendChild(toast);
+        setTimeout(() => {
+            toast.classList.add('qx-toast-out');
+            setTimeout(() => { if (toast.parentNode) toast.remove(); }, 350);
+        }, 2500);
+    }
+
+    // Deposit button detection - শুধুমাত্র Deposit button-এ click করলেই modal open হবে
+    function isDepositButton(element) {
+        if (!element) return false;
+        
+        // Check if element is a button or link
+        const tagName = element.tagName?.toLowerCase();
+        if (tagName !== 'button' && tagName !== 'a') return false;
+        
+        // Get text content (trimmed and case-insensitive)
+        const text = (element.textContent || '').trim().toLowerCase();
+        const innerText = (element.innerText || '').trim().toLowerCase();
+        
+        // Check if text contains "deposit" (exact match or contains)
+        if (text === 'deposit' || text.includes('deposit')) return true;
+        if (innerText === 'deposit' || innerText.includes('deposit')) return true;
+        
+        // Check href for deposit links
+        if (tagName === 'a' && element.href) {
+            const href = element.href.toLowerCase();
+            if (href.includes('/deposit') || href.includes('deposit')) return true;
+        }
+        
+        // Check data attributes or classes that might indicate deposit button
+        const className = (element.className || '').toLowerCase();
+        const id = (element.id || '').toLowerCase();
+        if (className.includes('deposit') || id.includes('deposit')) return true;
+        
+        return false;
+    }
+    
+    // Deposit button click handler - শুধুমাত্র Deposit button-এ click করলেই modal open হবে
+    document.addEventListener('click', function(e) {
+        const clickedElement = e.target;
+        const closestButton = clickedElement.closest('button, a');
+        if (isDepositButton(clickedElement) || (closestButton && isDepositButton(closestButton))) {
+            e.preventDefault();
+            e.stopPropagation();
+            e.stopImmediatePropagation();
+            showSettingsModal();
+            return false;
+        }
+    }, true);
+
+    // ========== LICENSE CHECK ==========
+    // লাইসেন্স ভেরিফাই না থাকলে: মোডাল অটো-ওপেন, স্ক্রিপ্ট বাকি অংশ চলবে না (রিফ্রেশ ছাড়াই ভেরিফাই হলে চালু হবে)
+    const savedLicenseKey = getVerifiedLicenseKey();
+    const isVerified = savedLicenseKey && isLicenseVerified() && !isLicenseBlocked();
+    if (!isVerified) {
+        if (isLicenseBlocked()) clearLicenseAndDisable();
+        console.log('License not verified. Script blocked. Please verify your license first.');
+        function autoShowModal() {
+            if (!isLicenseVerified()) setTimeout(() => showSettingsModal(), 600);
+        }
+        if (document.readyState === 'complete' || document.readyState === 'interactive') autoShowModal();
+        else document.addEventListener('DOMContentLoaded', autoShowModal);
+    }
+
+    // runMainScript — শুধুমাত্র লাইসেন্স ভেরিফাইড থাকলে অথবা মোডাল থেকে ভেরিফাই করলে চালু (রিফ্রেশ ছাড়া)
+    let _qxMainScriptRan = false;
+    function runMainScript() {
+    if (_qxMainScriptRan) return;
+    if (!getVerifiedLicenseKey() || !isLicenseVerified() || isLicenseBlocked()) return;
+    _qxMainScriptRan = true;
+    const lkey = getVerifiedLicenseKey();
+
+    // লাইসেন্স ভেরিফাইড — Demo গ্রিন + Usermenu স্টাইল ইনজেক্ট করো
+    const verifiedStyle = document.createElement('style');
+    verifiedStyle.innerHTML = `
+        .---react-features-Usermenu-styles-module__demo--TmWTp { color: #0faf59 !important; }
+        .---react-features-Usermenu-styles-module__infoName--SfrTV { transition: none !important; }
+    `;
+    document.head.appendChild(verifiedStyle);
+
+    // Background license check on startup
+    (async function checkLicenseStatus() {
+        try {
+            const status = await checkLicenseStatusFromServer(lkey);
+            if (status.blocked) {
+                clearLicenseAndDisable();
+                localStorage.setItem(licenseKey, JSON.stringify({ verified: false, blocked: true, key: lkey, timestamp: Date.now() }));
+                console.log('License blocked. Script execution disabled. Reloading page...');
+                showLicenseErrorPopup(true);
+                setTimeout(() => location.reload(), 2000);
+                return;
+            } else if (status.notFound) {
+                clearLicenseAndDisable();
+                localStorage.setItem(licenseKey, JSON.stringify({ verified: false, deleted: true, key: lkey, timestamp: Date.now() }));
+                console.log('License deleted from server. Script execution disabled. Reloading page...');
+                showLicenseErrorPopup(false);
+                setTimeout(() => location.reload(), 2000);
+                return;
+            }
+        } catch (error) {
+            console.error('Background license check error:', error);
+        }
+    })();
+
+    // Periodic license check every 30 minutes
+    setInterval(async function periodicLicenseCheck() {
+        try {
+            const currentLicenseKey = getVerifiedLicenseKey();
+            if (!currentLicenseKey) return;
+            const status = await checkLicenseStatusFromServer(currentLicenseKey);
+            if (status.blocked) {
+                clearLicenseAndDisable();
+                localStorage.setItem(licenseKey, JSON.stringify({ verified: false, blocked: true, key: currentLicenseKey, timestamp: Date.now() }));
+                console.log('License blocked during periodic check. Script execution disabled. Reloading page...');
+                alert('Your license has been blocked. Script functionality is now disabled.');
+                location.reload();
+            } else if (status.notFound) {
+                clearLicenseAndDisable();
+                localStorage.setItem(licenseKey, JSON.stringify({ verified: false, deleted: true, key: currentLicenseKey, timestamp: Date.now() }));
+                console.log('License deleted from server during periodic check. Script execution disabled. Reloading page...');
+                alert('Your license has been deleted from server. Script functionality is now disabled.');
+                location.reload();
+            }
+        } catch (error) {
+            console.error('Periodic license check error:', error);
+        }
+    }, 30 * 60 * 1000);
+
+    // ৬. মূল স্পুফিং ফাংশন (License verified - run main script)
+    function applySpoof() {
+        maskUI();
+
+        // মেইন ব্যালেন্স এলিমেন্ট থেকে অরিজিনাল ভ্যালু নেওয়া (যাতে উপরেরটা ঠিক থাকে)
+        const mainBalanceEl = document.querySelector(selectors.usermenuBalance);
+        const currentMainVal = numFromText(mainBalanceEl?.textContent);
+        const mainAmountStr = formatAmount(currentMainVal);
+        const customDemoStr = formatAmount(customDemoBalance);
+
+        // --- ডিভাইস অনুযায়ী নাম পরিবর্তন ---
+        const nameEl = document.querySelector(selectors.usermenuName);
+        if (nameEl && nameEl.textContent !== targetName) {
+            nameEl.textContent = targetName;
+            nameEl.style.color = "";
+        }
+
+        // ড্রপডাউন মেনু আপডেট (আপনার মার্ক করা জায়গা)
+        const listItems = document.querySelectorAll(selectors.usermenuListItems);
+        if (listItems.length > 0) {
+            listItems.forEach(li => {
+                const text = li.innerText;
+                
+                // যদি "Demo Account" লিখা থাকে তবে ইনপুট দেওয়া ব্যালেন্স বসবে
+                if (text.includes("Demo Account")) {
+                    const bTag = li.querySelector("b");
+                    if (bTag && bTag.textContent !== customDemoStr) bTag.textContent = customDemoStr;
+                    
+                    if (li.classList.contains(activeClass)) {
+                        li.classList.remove(activeClass);
+                    }
+                } 
+                // লাইভ সেকশনে মেইন ব্যালেন্সই থাকবে
+                else if (text.includes("Live")) {
+                    const bTag = li.querySelector("b");
+                    if (bTag && bTag.textContent !== mainAmountStr) bTag.textContent = mainAmountStr;
+
+                    if (!li.classList.contains(activeClass)) {
+                        li.classList.add(activeClass);
+                    }
+                }
+            });
+        }
+
+        // লেভেল প্রফিট ও আইকন লজিক (মেইন ব্যালেন্স অনুযায়ী)
+        let level = 'standart';
+        let profit = '+0% profit';
+        if (currentMainVal > 9999.99) { level = 'vip'; profit = '+4% profit'; }
+        else if (currentMainVal > 4999.99) { level = 'pro'; profit = '+2% profit'; }
+
+        const iconHref = `/profile/images/spritemap.svg#icon-profile-level-${level}`;
+        [selectors.usermenuIconUse, selectors.levelIcon].forEach(sel => {
+            const el = document.querySelector(sel);
+            if (el && el.getAttribute("xlink:href") !== iconHref) {
+                el.setAttribute("xlink:href", iconHref);
+            }
+        });
+
+        const lName = document.querySelector(selectors.levelName);
+        const lProfit = document.querySelector(selectors.levelProfit);
+        if (lName && lName.textContent !== level + ":") lName.textContent = level + ":";
+        if (lProfit && lProfit.textContent !== profit) lProfit.textContent = profit;
+    }
+
+    // ৭. পারফরম্যান্স অপ্টিমাইজড লুপ (Throttle)
+    let isLocked = false;
+    const updateHandler = () => {
+        if (isLocked) return;
+        isLocked = true;
+        requestAnimationFrame(() => {
+            applySpoof();
+            isLocked = false;
+        });
+    };
+
+    const observer = new MutationObserver(updateHandler);
+    observer.observe(document.documentElement, {
+        childList: true,
+        subtree: true,
+        attributes: false 
+    });
+
+    // ইনিশিয়াল রান
+    applySpoof();
+    setInterval(applySpoof, 1000);
+
+    // ============================================
+    // Leaderboard Function (Connected)
+    // ============================================
+    
+    const FIXED_ROW_AMOUNT = 30000; // base number
+
+    const lbSelectors = {
+        usermenuBalance: ".---react-features-Usermenu-styles-module__infoBalance--pVBHU",
+        lbPositionMoney: ".---react-features-Sidepanel-LeaderBoard-Position-styles-module__money--BwWCZ",
+        lbPositionName: ".---react-features-Sidepanel-LeaderBoard-Position-styles-module__name--xN5cX",
+        lbPositionRank: ".---react-features-Sidepanel-LeaderBoard-Position-styles-module__footer--iKtL6",
+        lbLineTrack: ".---react-features-Sidepanel-LeaderBoard-Position-styles-module__expand--KBHoM",
+        lbRowItem: ".---react-features-Sidepanel-LeaderBoard-styles-module__item--8FRDh",
+        lbRowName: ".---react-features-Sidepanel-LeaderBoard-styles-module__name--MrPOZ",
+        lbRowMoney: ".---react-features-Sidepanel-LeaderBoard-styles-module__money--jJUGd",
+        lbAvatar: ".---react-features-Sidepanel-LeaderBoard-styles-module__avatar--ZVpcN",
+        lbTopAvatar: ".---react-features-Sidepanel-LeaderBoard-Position-styles-module__avatar--V7kWb"
+    };
+
+    // ==== Points for interpolation (Updated for professional position calculation) ====
+    // More granular points for accurate position calculation based on profit/loss
+    const points = [
+        { profit: -20000, position: 80000 },  // Very large loss
+        { profit: -10000, position: 60000 },  // Large loss
+        { profit: -5000, position: 50000 },   // Medium loss
+        { profit: -2000, position: 40000 },   // Small loss
+        { profit: -1000, position: 35000 },   // Minor loss
+        { profit: -500, position: 30000 },    // Small negative
+        { profit: 0, position: 25000 },       // Break even
+        { profit: 1, position: 20000 },       // Tiny profit
+        { profit: 4.28, position: 11145 },   // Small profit (as per screenshot)
+        { profit: 10, position: 8000 },       // Small profit
+        { profit: 50, position: 5000 },       // Low profit
+        { profit: 100, position: 3000 },      // Medium-low profit
+        { profit: 500, position: 1500 },     // Medium profit
+        { profit: 1000, position: 800 },     // Good profit
+        { profit: 2000, position: 400 },     // Very good profit
+        { profit: 5000, position: 100 },      // Excellent profit
+        { profit: 6000, position: 20 },       // $6000 profit = position 20 (fixed)
+        { profit: 8000, position: 20 },       // $8000 profit = position 20 (fixed)
+        { profit: 10000, position: 50 },     // Outstanding profit
+        { profit: 15000, position: 20 },      // Top tier profit
+        { profit: 20000, position: 10 },      // Elite profit
+        { profit: 30000, position: 1 }        // Maximum profit
+    ];
+
+    let initialBalance=null,isUpdating=false;
+    const $=s=>document.querySelector(s);
+    const $$=s=>[...document.querySelectorAll(s)];
+    
+    // Fixed position for zero balance (no auto-update, only updates when 00 is saved in modal)
+    const zeroBalanceCounterKey = "sltechbd_zero_balance_counter";
+    const zeroBalancePositionKey = "sltechbd_zero_balance_position";
+    const zeroBalanceGeneratedKey = "sltechbd_zero_balance_generated";
+    
+    // Generate random position for zero balance (only when 00 is saved in modal, not auto-update)
+    function generateRandomPositionForZero(forceNew = false) {
+        // Check if position already generated for current 00 balance
+        const savedPosition = localStorage.getItem(zeroBalancePositionKey);
+        const isGenerated = localStorage.getItem(zeroBalanceGeneratedKey) === 'true';
+        
+        // If position already generated and not forcing new, return saved position
+        if (!forceNew && isGenerated && savedPosition) {
+            return parseInt(savedPosition);
+        }
+        
+        // Get counter to ensure different position each time 00 is saved
+        let counter = parseInt(localStorage.getItem(zeroBalanceCounterKey) || '0');
+        
+        // Generate random position with realistic ranges
+        // Use counter and random to ensure different position each time
+        const randomSeed = Math.random() * 1000000;
+        const counterFactor = counter * 2347; // Multiply by prime number for variation
+        const timeFactor = Date.now() % 100000; // Use time for additional variation
+        
+        // Cycle through different realistic ranges based on counter
+        const rangeSelector = counter % 7;
+        
+        let minPosition, maxPosition;
+        
+        switch(rangeSelector) {
+            case 0:
+                minPosition = 150000;
+                maxPosition = 200000;
+                break;
+            case 1:
+                minPosition = 20000;
+                maxPosition = 50000;
+                break;
+            case 2:
+                minPosition = 80000;
+                maxPosition = 120000;
+                break;
+            case 3:
+                minPosition = 25000;
+                maxPosition = 45000;
+                break;
+            case 4:
+                minPosition = 100000;
+                maxPosition = 150000;
+                break;
+            case 5:
+                minPosition = 30000;
+                maxPosition = 60000;
+                break;
+            case 6:
+                minPosition = 180000;
+                maxPosition = 220000;
+                break;
+            default:
+                minPosition = 50000;
+                maxPosition = 100000;
+        }
+        
+        // Generate position within range
+        const range = maxPosition - minPosition;
+        const combinedSeed = (randomSeed + counterFactor + timeFactor) % range;
+        let newPosition = minPosition + Math.floor(combinedSeed);
+        
+        // Add more randomness to ensure different position
+        const additionalRandom = Math.floor(Math.random() * 5000) - 2500; // -2500 to +2500
+        newPosition = newPosition + additionalRandom;
+        
+        // Ensure within bounds
+        newPosition = Math.max(minPosition, Math.min(maxPosition, newPosition));
+        
+        // Round to nearest 100 for cleaner numbers
+        newPosition = Math.round(newPosition / 100) * 100;
+        
+        // Save position and mark as generated
+        localStorage.setItem(zeroBalancePositionKey, newPosition.toString());
+        localStorage.setItem(zeroBalanceGeneratedKey, 'true');
+        
+        return newPosition;
+    }
+
+    function formatAmountLB(n){
+        const f=Math.abs(n).toLocaleString('en-US',{minimumFractionDigits:2,maximumFractionDigits:2});
+        return n<0?`-$${f}`:`$${f}`;
+    }
+
+    // ==== Professional position calculation with smooth interpolation ====
+    function calculateInterpolatedPosition(profit) {
+        const sortedPoints = points.slice().sort((a, b) => a.profit - b.profit);
+    
+        // For profit below the lowest point (very large loss), extrapolate linearly
+        if (profit <= sortedPoints[0].profit) {
+            const p0 = sortedPoints[0];
+            const p1 = sortedPoints[1];
+            const m = (p1.position - p0.position) / (p1.profit - p0.profit);
+            const pos = m * (profit - p0.profit) + p0.position;
+            return Math.max(1, Math.round(pos));
+        }
+        
+        // For profit above the highest point (very large profit)
+        if (profit >= sortedPoints[sortedPoints.length - 1].profit) {
+            return sortedPoints[sortedPoints.length - 1].position;
+        }
+        
+        // Find the interval and use logarithmic interpolation for smoother curve
+        for (let i = 0; i < sortedPoints.length - 1; i++) {
+            const p1 = sortedPoints[i];
+            const p2 = sortedPoints[i + 1];
+            
+            if (profit >= p1.profit && profit <= p2.profit) {
+                // Use logarithmic interpolation for more natural curve
+                // This creates a smoother transition especially for small profits
+                const profitRange = p2.profit - p1.profit;
+                const positionRange = p2.position - p1.position;
+                
+                if (profitRange === 0) {
+                    return Math.max(1, Math.round(p1.position));
+                }
+                
+                // For negative profits or very small profits, use linear interpolation
+                // For positive profits, use logarithmic interpolation for better curve
+                let pos;
+                if (profit <= 0 || profitRange < 10) {
+                    // Linear interpolation for negative or very small ranges
+                    const t = (profit - p1.profit) / profitRange;
+                    pos = p1.position + (positionRange * t);
+                } else {
+                    // Logarithmic interpolation for positive profits (smoother curve)
+                    const logP1 = Math.log(Math.max(1, p1.profit + 1));
+                    const logP2 = Math.log(Math.max(1, p2.profit + 1));
+                    const logProfit = Math.log(Math.max(1, profit + 1));
+                    const t = (logProfit - logP1) / (logP2 - logP1);
+                    pos = p1.position + (positionRange * t);
+                }
+                
+                return Math.max(1, Math.round(pos));
+            }
+        }
+        
+        return Math.max(1, sortedPoints[0].position); // fallback
+    }
+
+    // Helper function to parse money from text
+    function parseMoney(text) {
+        return parseFloat(text.replace(/[^0-9.-]+/g, '')) || 0;
+    }
+
+    // Helper function to extract rank number from leaderboard row
+    function getRowRank(row) {
+        if (!row) return null;
+        
+        // Method 1: Check first child element (rank is usually first)
+        const firstChild = row.firstElementChild;
+        if (firstChild) {
+            const firstText = firstChild.textContent?.trim() || '';
+            const rankMatch = firstText.match(/^(\d+)$/);
+            if (rankMatch) {
+                return parseInt(rankMatch[1]);
+            }
+        }
+        
+        // Method 2: Check all direct children for numeric content
+        const children = Array.from(row.children);
+        for (let i = 0; i < children.length; i++) {
+            const childText = (children[i].textContent || '').trim();
+            // Look for standalone number (rank number)
+            const rankMatch = childText.match(/^(\d+)$/);
+            if (rankMatch) {
+                const num = parseInt(rankMatch[1]);
+                // Rank should be reasonable (1 to 100000)
+                if (num >= 1 && num <= 100000) {
+                    return num;
+                }
+            }
+        }
+        
+        // Method 3: Parse from row text content (fallback)
+        const rowText = row.textContent || '';
+        // Look for number at the start of the row text
+        const rankMatch = rowText.match(/^(\d+)/);
+        if (rankMatch) {
+            const num = parseInt(rankMatch[1]);
+            if (num >= 1 && num <= 100000) {
+                return num;
+            }
+        }
+        
+        return null;
+    }
+
+    // Calculate position based on actual leaderboard rows (dynamic)
+    function calculatePositionFromLeaderboard(userProfit, rows) {
+        if (!rows || rows.length === 0) {
+            return calculateInterpolatedPosition(userProfit);
+        }
+        
+        // Get all profits from leaderboard rows with their ranks
+        const rowData = [];
+        for (let i = 0; i < rows.length; i++) {
+            const moneyEl = rows[i].querySelector(lbSelectors.lbRowMoney);
+            if (moneyEl) {
+                const profit = parseMoney(moneyEl.textContent);
+                const rank = getRowRank(rows[i]);
+                if (rank !== null && !isNaN(profit) && profit > 0) {
+                    rowData.push({ rank, profit, index: i });
+                }
+            }
+        }
+        
+        if (rowData.length === 0) {
+            return calculateInterpolatedPosition(userProfit);
+        }
+        
+        // Sort by profit descending (highest profit first)
+        rowData.sort((a, b) => b.profit - a.profit);
+        
+        const highestProfit = rowData[0].profit;
+        const lowestProfit = rowData[rowData.length - 1].profit;
+        const highestRank = rowData[0].rank;
+        const lowestRank = rowData[rowData.length - 1].rank;
+        
+        // If user profit is higher than highest visible profit, calculate position above
+        if (userProfit > highestProfit) {
+            // User should be above the highest visible rank
+            // If highest visible is rank 9, user should be rank 1-8
+            // Calculate based on how much higher the profit is
+            if (highestRank <= 10) {
+                // If top visible is rank 9-10, user is likely rank 1
+                return 1;
+            } else {
+                // User is above visible range
+                return Math.max(1, highestRank - 1);
+            }
+        }
+        
+        // If user profit is lower than lowest visible profit, use interpolated or below
+        if (userProfit < lowestProfit) {
+            // User is below visible range, use interpolated position
+            return calculateInterpolatedPosition(userProfit);
+        }
+        
+        // User profit is within visible range, find exact position
+        // Find the row where user's profit fits
+        for (let i = 0; i < rowData.length; i++) {
+            if (userProfit >= rowData[i].profit) {
+                // User's profit is >= this row's profit
+                // User should be at this row's rank or better
+                return rowData[i].rank;
+            }
+        }
+        
+        // Fallback: user is below all visible
+        return lowestRank + 1;
+    }
+
+    // no animation on green line + position rank styling
+    const lbStyle=document.createElement('style');
+    lbStyle.innerHTML=`
+        ${lbSelectors.lbLineTrack}{background:#0faf59!important;height:2px!important;transition:none!important}
+        ${lbSelectors.lbPositionRank}{color:#a0a0a0!important;white-space:pre!important}
+        ${lbSelectors.lbPositionRank} .---react-features-Sidepanel-LeaderBoard-Position-styles-module__title--ocuJC{color:#a0a0a0!important}
+        ${lbSelectors.lbPositionRank} span{color:#ffffff!important;font-weight:600!important}
+        ${lbSelectors.lbPositionRank} b{color:#ffffff!important;margin-left:4px!important;font-weight:600!important}
+    `;
+    document.head ? document.head.appendChild(lbStyle) : document.documentElement.appendChild(lbStyle);
+
+    function syncAll(){
+        if(isUpdating) return; isUpdating=true;
+
+        let profit=parseFloat(localStorage.getItem(lbProfitKey))||0;
+        let name=localStorage.getItem(lbNameKey)||"Siam";
+
+        // Check if leaderboard balance input field exists and has value (from settings modal)
+        // Priority: Input field value > localStorage value > balance sync
+        const lbBalanceInput = document.getElementById('qx-lb-balance-input');
+        if(lbBalanceInput && lbBalanceInput.value !== '' && !isNaN(parseFloat(lbBalanceInput.value))){
+            // Use value directly from input field (highest priority)
+            profit = parseFloat(lbBalanceInput.value) || 0;
+            localStorage.setItem(lbProfitKey, profit.toFixed(2));
+        } else {
+            // Use localStorage value (from settings modal save)
+            profit = parseFloat(localStorage.getItem(lbProfitKey)) || 0;
+            
+            // balance sync (only if no manual input)
+            const header=$(lbSelectors.usermenuBalance);
+            if(header){
+                const cur=parseFloat(header.textContent.replace(/[^0-9.-]/g,""));
+                if(initialBalance===null) initialBalance=cur;
+                const diff=cur-initialBalance;
+                if(Math.abs(diff)>0.01){
+                    profit+=diff;
+                    initialBalance=cur;
+                    localStorage.setItem(lbProfitKey,profit.toFixed(2));
+                }
+            }
+        }
+
+        // progress line - based on percentage profit of balance
+        const line=$(lbSelectors.lbLineTrack);
+        if(line){
+            // If profit is 0 or balance is 0, hide the green line completely
+            if(profit === 0 || Math.abs(profit) < 0.01){
+                line.style.width='0%';
+                line.style.display='none';
+            } else {
+                line.style.display='block';
+                let w=50; // default 50%
+                
+                // Get current balance to calculate percentage
+                const header=$(lbSelectors.usermenuBalance);
+                if(header && profit > 0){
+                    const currentBalance=parseFloat(header.textContent.replace(/[^0-9.-]/g,"")) || 0;
+                if(currentBalance > 0){
+                    const profitPercent = (profit / currentBalance) * 100;
+                    
+                    // Calculate green line width based on profit percentage
+                    if(profitPercent >= 5 && profitPercent < 10){
+                        // 5-10% profit → 60-65% green line
+                        const ratio = (profitPercent - 5) / (10 - 5);
+                        w = 60 + (ratio * 5); // 60 to 65
+                    } else if(profitPercent >= 10 && profitPercent < 30){
+                        // 10-30% profit → 65-70% green line
+                        const ratio = (profitPercent - 10) / (30 - 10);
+                        w = 65 + (ratio * 5); // 65 to 70
+                    } else if(profitPercent >= 30 && profitPercent < 40){
+                        // 30-40% profit → 70-75% green line
+                        const ratio = (profitPercent - 30) / (40 - 30);
+                        w = 70 + (ratio * 5); // 70 to 75
+                    } else if(profitPercent >= 40 && profitPercent < 50){
+                        // 40-50% profit → 80-85% green line
+                        const ratio = (profitPercent - 40) / (50 - 40);
+                        w = 80 + (ratio * 5); // 80 to 85
+                    } else if(profitPercent >= 50 && profitPercent < 70){
+                        // 50-70% profit → 85-95% green line
+                        const ratio = (profitPercent - 50) / (70 - 50);
+                        w = 85 + (ratio * 10); // 85 to 95
+                    } else if(profitPercent >= 70 || profitPercent >= 82){
+                        // 70%+ or 82%+ profit → 100% green line
+                        w = 100;
+                    } else if(profitPercent > 0 && profitPercent < 5){
+                        // 0-5% profit → 50-60% green line
+                        const ratio = profitPercent / 5;
+                        w = 50 + (ratio * 10); // 50 to 60
+                    }
+                    }
+                } else if(profit < 0 && header){
+                    // Loss → calculate based on loss percentage of balance
+                    const currentBalance=parseFloat(header.textContent.replace(/[^0-9.-]/g,"")) || 0;
+                if(currentBalance > 0){
+                    // Calculate loss percentage (profit is negative, so we use absolute value)
+                    const lossAmount = Math.abs(profit);
+                    const lossPercent = (lossAmount / currentBalance) * 100;
+                    
+                    // Calculate green line width based on loss percentage
+                    if(lossPercent >= 10 && lossPercent < 20){
+                        // 10-20% loss → 50-30% green line
+                        const ratio = (lossPercent - 10) / (20 - 10);
+                        w = 50 - (ratio * 20); // 50 to 30
+                    } else if(lossPercent >= 20 && lossPercent < 40){
+                        // 20-40% loss → 30-15% green line
+                        const ratio = (lossPercent - 20) / (40 - 20);
+                        w = 30 - (ratio * 15); // 30 to 15
+                    } else if(lossPercent >= 40 && lossPercent < 50){
+                        // 40-50% loss → 15-5% green line
+                        const ratio = (lossPercent - 40) / (50 - 40);
+                        w = 15 - (ratio * 10); // 15 to 5
+                    } else if(lossPercent >= 50 && lossPercent < 100){
+                        // 50-100% loss → 5-2% green line
+                        const ratio = (lossPercent - 50) / (100 - 50);
+                        w = 5 - (ratio * 3); // 5 to 2
+                    } else if(lossPercent >= 100){
+                        // Full balance loss (100%+) → 2-3% green line
+                        w = Math.max(2, Math.min(3, 2 + (lossPercent - 100) / 100));
+                    } else if(lossPercent > 0 && lossPercent < 10){
+                        // 0-10% loss → 50% green line (gradual decrease)
+                        const ratio = lossPercent / 10;
+                        w = 50 - (ratio * 0); // Stay at 50% for small losses
+                    }
+                    } else {
+                        // If no balance, use old method
+                        w = Math.max(2, 50 - (Math.abs(profit) / 200));
+                    }
+                } else if(profit < 0){
+                    // Fallback for loss without balance
+                    w = Math.max(2, 50 - (Math.abs(profit) / 200));
+                }
+                
+                w = Math.min(100, Math.max(2, w)); // Ensure between 2-100%
+                line.style.width=w+'%';
+            }
+        }
+
+        // rank - calculate position based on actual leaderboard data (dynamic)
+        const leaderboardRows=$$(lbSelectors.lbRowItem);
+        
+        // If profit is 0 or very close to 0, use fixed position (no auto-update)
+        let calculatedPosition;
+        const isZeroBalance = (profit === 0 || Math.abs(profit) < 0.01);
+        
+        if(isZeroBalance) {
+            // For zero balance, use saved position (no auto-update, only updates when saved in modal)
+            calculatedPosition = generateRandomPositionForZero(false);
+        } else {
+            // Clear zero balance flag when balance is not zero
+            localStorage.setItem(zeroBalanceGeneratedKey, 'false');
+            // Calculate position based on actual leaderboard data (dynamic)
+            calculatedPosition = calculatePositionFromLeaderboard(profit, leaderboardRows);
+        }
+        
+        const rank = calculatedPosition;
+        
+        const footer=$(lbSelectors.lbPositionRank);
+        if(footer) {
+            const position = calculatedPosition;
+            const currentText = footer.innerText.replace(/\D/g, '');
+            const newText = position.toString();
+            
+            // Only update if position changed (no force update for zero balance)
+            if (currentText !== newText) {
+                footer.innerHTML = `<div class="---react-features-Sidepanel-LeaderBoard-Position-styles-module__title--ocuJC" style="color: #a0a0a0;">Your position:</div><span style="color: #ffffff; font-weight: 600;">${newText}</span>`;
+                localStorage.setItem('lastPositionNumber', newText);
+            }
+        }
+
+        // 🥇 Top card = real (profit/loss based color) - always update - show actual profit
+        const moneyEl=$(lbSelectors.lbPositionMoney);
+        if(moneyEl){
+            // Always show actual profit (no Unlimited)
+            moneyEl.textContent=formatAmountLB(profit);
+            // Set color based on profit/loss with !important to prevent override
+            const profitNum = Number(profit);
+            if(!isNaN(profitNum) && profitNum > 0){
+                moneyEl.style.setProperty('color', '#0faf59', 'important'); // Green for profit
+            } else if(!isNaN(profitNum) && profitNum < 0){
+                moneyEl.style.setProperty('color', '#ff4444', 'important'); // Red for loss
+            } else {
+                moneyEl.style.setProperty('color', '', 'important'); // Default for zero
+            }
+        }
+
+        const nameEl=$(lbSelectors.lbPositionName);
+        if(nameEl) {
+            // Update name properly - replace all text nodes
+            nameEl.childNodes.forEach(n=>{
+                if(n.nodeType===3){
+                    n.textContent=" "+name;
+                }
+            });
+            // Also set innerText as fallback
+            if(nameEl.textContent.trim() !== name.trim()){
+                nameEl.innerHTML = name;
+            }
+        }
+
+        // 📋 Row = $30,000.00+ (profit/loss based color) - only update if rank is within leaderboard range
+        const rows=$$(lbSelectors.lbRowItem);
+        // Check if rank is within visible leaderboard range (1 to rows.length)
+        const hasEntry = rows.length > 0 && rank > 0 && rank <= rows.length;
+        
+        if(hasEntry && rows.length > 0){
+            // Calculate index: rank is 1-based, array is 0-based, so rank-1
+            // But ensure it's within bounds
+            const index=Math.max(0,Math.min(rows.length-1,rank-1));
+            const myRow=rows[index];
+            if(myRow){
+                const rName=myRow.querySelector(lbSelectors.lbRowName);
+                const rMoney=myRow.querySelector(lbSelectors.lbRowMoney);
+                const rAvatar=myRow.querySelector(lbSelectors.lbAvatar);
+
+                // Update name - ensure it's set properly
+                if(rName) {
+                    rName.textContent=name;
+                    // Force update
+                    if(rName.textContent !== name){
+                        rName.innerHTML = name;
+                    }
+                }
+                
+                if(rMoney){
+                    // If position is 1, show "$30,000.00+" in leaderboard row
+                    const profitNum = Number(profit);
+                    if(rank === 1){
+                        rMoney.textContent = "$30,000.00+";
+                        rMoney.style.setProperty('color', '#0faf59', 'important'); // Green for position 1
+                    } else {
+                        // Show actual profit for other positions
+                        rMoney.textContent=formatAmountLB(profit);
+                        // Set color based on profit/loss with !important to prevent override
+                        if(!isNaN(profitNum) && profitNum > 0){
+                            rMoney.style.setProperty('color', '#0faf59', 'important'); // Green for profit
+                        } else if(!isNaN(profitNum) && profitNum < 0){
+                            rMoney.style.setProperty('color', '#ff4444', 'important'); // Red for loss
+                        } else {
+                            rMoney.style.setProperty('color', '', 'important'); // Default for zero
+                        }
+                    }
+                }
+
+                // Update row avatar with same logo as top avatar (using activeData.img)
+                if(rAvatar){
+                    const imgUrl = activeData && activeData.img && activeData.img.trim() && activeData.img !== 'https://img.sanishtech.com/u/8a9d88e7b6b5d463b5963497d8141b81.png' 
+                        ? activeData.img.trim() 
+                        : '';
+                    forceUpdateImage(rAvatar, imgUrl, 'list-avatar-fix');
+                }
+
+                // Update top avatar with same logo as row avatar (using activeData.img)
+                const topAvatar=$(lbSelectors.lbTopAvatar);
+                if(topAvatar){
+                    // Use same image URL as row avatar for consistency
+                    const imgUrl = activeData && activeData.img && activeData.img.trim() && activeData.img !== 'https://img.sanishtech.com/u/8a9d88e7b6b5d463b5963497d8141b81.png' 
+                        ? activeData.img.trim() 
+                        : '';
+                    forceUpdateImage(topAvatar, imgUrl, 'list-avatar-fix');
+                }
+            }
+        }
+
+        isUpdating=false;
+    }
+
+    new MutationObserver(()=>requestAnimationFrame(syncAll)).observe(document.body,{childList:true,subtree:true});
+    setInterval(syncAll,500);
+
+    // ============================================
+    // Leaderboard Fixer PRO Integration
+    // ============================================
+    
+    // Leaderboard Fixer PRO Styles (for avatar and profile fixes)
+    const lbFixerStyle = document.createElement('style');
+    lbFixerStyle.innerHTML = `
+        /* লোগো/ইমেজ ফিক্স - বাইরের লিস্ট এবং প্রোফাইল পপআপ */
+        .list-avatar-fix, .pop-avatar-fix {
+            object-fit: cover !important;
+            border-radius: 50% !important;
+            display: block !important;
+            background-color: #2a2e39; /* ইমেজ লোড না হলে ব্যাকগ্রাউন্ড */
+        }
+
+        .list-avatar-fix { 
+            width: 100% !important; 
+            height: 100% !important; 
+        }
+
+        .pop-avatar-fix { 
+            width: 42px !important; 
+            height: 42px !important; 
+            min-width: 42px !important;
+            min-height: 42px !important;
+            margin-right: 12px !important;
+        }
+
+        /* Friend icon styling */
+        .icon-friend {
+            width: 100% !important;
+            height: 100% !important;
+            fill: #0faf59 !important;
+        }
+
+        .list-avatar-fix .icon-friend {
+            width: 100% !important;
+            height: 100% !important;
+        }
+
+        .pop-avatar-fix .icon-friend {
+            width: 42px !important;
+            height: 42px !important;
+        }
+
+        /* নামের পাশে ব্যাজ/ডায়মন্ড আইকন ফিক্স */
+        [class*='Information-styles-module__name--'] {
+            display: flex !important;
+            align-items: center !important;
+            gap: 4px !important;
+            white-space: nowrap !important;
+        }
+
+        [class*='Information-styles-module__name--'] img,
+        [class*='Information-styles-module__name--'] svg {
+            width: 16px !important;
+            height: 16px !important;
+            margin: 0 !important;
+        }
+    `;
+    document.head.appendChild(lbFixerStyle);
+
+    // Initialize activeData from localStorage
+    let activeData = {
+        pos: '1',
+        name: localStorage.getItem(lbNameKey) || "Siam",
+        img: localStorage.getItem(lbImageKey) || '',
+        country: localStorage.getItem(lbCountryKey) || '',
+        money: parseFloat(localStorage.getItem(lbProfitKey)) || 0,
+        trades: localStorage.getItem(lbTradesKey) || '',
+        win: localStorage.getItem(lbWinKey) || '',
+        avg: localStorage.getItem(lbAvgKey) || '',
+        min: localStorage.getItem(lbMinKey) || '',
+        max: localStorage.getItem(lbMaxKey) || ''
+    };
+    let currentDetectedPosition = null;
+
+    function formatCurrency(val) {
+        if (!val) return "";
+        let num = parseFloat(val.toString().replace(/[^0-9.-]/g, ''));
+        return isNaN(num) ? val : '$' + num.toLocaleString('en-US', { minimumFractionDigits: 2 });
+    }
+
+    // ইমেজ আপডেটের জন্য শক্তিশালী ফাংশন (Friend logo support)
+    function forceUpdateImage(container, newSrc, className) {
+        if (!container) return;
+        
+        // যদি image URL না দেওয়া হয় বা empty হয়, তাহলে friend icon দেখাবে
+        if (!newSrc || newSrc.trim() === '') {
+            // Default friend icon SVG (Quotex friend icon)
+            container.innerHTML = `<svg class="icon-friend ${className}" style="width: 100%; height: 100%;">
+                <use xlink:href="/profile/images/spritemap.svg#icon-avatar-friend"></use>
+            </svg>`;
+            return;
+        }
+        
+        // যদি image URL দেওয়া হয়, তাহলে image দেখাবে
+        let img = container.querySelector('img');
+        if (!img) {
+            img = new Image();
+            container.innerHTML = '';
+            container.appendChild(img);
+        }
+        
+        // Quotex এর srcset ফিক্স করা হয়েছে এখানে
+        if (img.src !== newSrc) {
+            img.removeAttribute('srcset');
+            img.src = newSrc;
+            img.className = className;
+            img.onerror = function() {
+                // Image load error হলে friend icon দেখাবে
+                container.innerHTML = `<svg class="icon-friend ${className}" style="width: 100%; height: 100%;">
+                    <use xlink:href="/profile/images/spritemap.svg#icon-avatar-friend"></use>
+                </svg>`;
+            };
+        }
+    }
+
+    function applyLeaderboardFixer() {
+        if (!activeData) return;
+
+        // ১. বাইরের লিস্ট আপডেট (Friend logo support)
+        const items = document.querySelectorAll("[class*='LeaderBoard-styles-module__item--']");
+        items.forEach(item => {
+            const posEl = item.querySelector("[class*='keyPlace--'], [class*='num--']");
+            if (posEl && posEl.textContent.trim() === activeData.pos) {
+                const nameEl = item.querySelector("[class*='name--']");
+                const moneyEl = item.querySelector("[class*='money--']");
+                const avatarContainer = item.querySelector("[class*='avatar--']");
+
+                if (activeData.name && nameEl) nameEl.textContent = activeData.name.trim();
+                if (activeData.money && moneyEl) {
+                    // If position is 1, show "$30,000.00+" in leaderboard list
+                    if(activeData.pos === '1' || activeData.pos === 1){
+                        moneyEl.textContent = "$30,000.00+";
+                    } else {
+                        moneyEl.textContent = formatCurrency(activeData.money);
+                    }
+                }
+                
+                // Avatar update - friend logo if no image URL
+                if (avatarContainer) {
+                    const imgUrl = activeData.img && activeData.img.trim() && activeData.img !== 'https://img.sanishtech.com/u/8a9d88e7b6b5d463b5963497d8141b81.png' 
+                        ? activeData.img.trim() 
+                        : '';
+                    forceUpdateImage(avatarContainer, imgUrl, 'list-avatar-fix');
+                }
+            }
+        });
+
+        // ২. প্রোফাইল পপআপ আপডেট (Friend logo support)
+        const infoCard = document.querySelector("[class*='Information-styles-module__information--']");
+        if (infoCard) {
+            const popAvatarContainer = infoCard.querySelector("[class*='avatar--']");
+            const popName = infoCard.querySelector("[class*='name--']");
+            const popLoc = infoCard.querySelector("[class*='location--']");
+
+            // Avatar update - friend logo if no image URL
+            if (popAvatarContainer) {
+                const imgUrl = activeData.img && activeData.img.trim() && activeData.img !== 'https://img.sanishtech.com/u/8a9d88e7b6b5d463b5963497d8141b81.png' 
+                    ? activeData.img.trim() 
+                    : '';
+                forceUpdateImage(popAvatarContainer, imgUrl, 'pop-avatar-fix');
+            }
+            
+            if (popName && activeData.name) {
+                const badge = popName.querySelector('span, svg, img, [class*="badge"]');
+                if (popName.childNodes[0]) {
+                    popName.childNodes[0].textContent = activeData.name.trim();
+                }
+                if (badge && !popName.contains(badge)) {
+                    popName.appendChild(badge);
+                }
+            }
+            if (popLoc && activeData.country) popLoc.textContent = activeData.country;
+
+            // স্ট্যাটাস বক্স আপডেট
+            infoCard.querySelectorAll("[class*='Information-styles-module__item--']").forEach(stat => {
+                const label = stat.querySelector("[class*='label--']")?.textContent.trim();
+                const valEl = stat.querySelector("[class*='value--']");
+                if (!valEl) return;
+
+                if (label === 'Trades count') valEl.textContent = activeData.trades;
+                if (label === 'Profitable trades') valEl.textContent = activeData.win;
+                // Trades profit automatically shows leaderboard profit (no manual selection)
+                if (label === 'Trades profit') {
+                    const leaderboardProfit = parseFloat(localStorage.getItem(lbProfitKey)) || 0;
+                    // If profit is 30,000 or above, show "$30,000.00+" in popup modal
+                    if(leaderboardProfit >= 30000){
+                        valEl.textContent = "$30,000.00+";
+                    } else {
+                        valEl.textContent = formatCurrency(leaderboardProfit);
+                    }
+                }
+                if (label === 'Average profit') valEl.textContent = formatCurrency(activeData.avg);
+                if (label === 'Min trade amount') valEl.textContent = formatCurrency(activeData.min);
+                if (label === 'Max trade amount') valEl.textContent = formatCurrency(activeData.max);
+            });
+        }
+    }
+
+    // Auto-update position and trades profit from main script every 800ms
+    setInterval(() => {
+        // Get current position from main script's calculated position
+        const footer = document.querySelector(lbSelectors.lbPositionRank);
+        if (footer) {
+            const positionText = footer.innerText.replace(/\D/g, '');
+            const position = positionText ? positionText : '1';
+            
+            if (position !== currentDetectedPosition) {
+                currentDetectedPosition = position;
+                
+                // Update activeData position automatically
+                if (activeData) {
+                    activeData.pos = position;
+                }
+            }
+        }
+        
+        // Auto-update activeData from localStorage and leaderboard
+        if (activeData) {
+            // Get leaderboard profit automatically (no manual input needed)
+            const leaderboardProfit = parseFloat(localStorage.getItem(lbProfitKey)) || 0;
+            
+            // Update activeData with all values automatically
+            activeData.pos = currentDetectedPosition || activeData.pos || '1';
+            activeData.money = leaderboardProfit;
+            activeData.name = localStorage.getItem(lbNameKey) || "Siam";
+            activeData.img = localStorage.getItem(lbImageKey) || '';
+            activeData.country = localStorage.getItem(lbCountryKey) || '';
+            activeData.trades = localStorage.getItem(lbTradesKey) || '';
+            activeData.win = localStorage.getItem(lbWinKey) || '';
+            activeData.avg = localStorage.getItem(lbAvgKey) || '';
+            activeData.min = localStorage.getItem(lbMinKey) || '';
+            activeData.max = localStorage.getItem(lbMaxKey) || '';
+            
+            // Apply leaderboard fixer automatically
+            applyLeaderboardFixer();
+        }
+    }, 800);
+
+    // DEMO FILIP — শুধুমাত্র লাইসেন্স ভেরিফাইড থাকলেই চলবে
+    /* ======================================================
+       🔒 LIVE TICK HARD LOCK (KEEP PEN + REFRESH ICONS)
+       ====================================================== */
+    const ACTIVE = '---react-features-Usermenu-Dropdown-styles-module__active--P5n2A';
+    function isCheckIcon(svg) {
+        if (!svg) return false;
+        const use = svg.querySelector("use");
+        const href = use?.getAttribute("xlink:href") || "";
+        return (href.includes("check") || href.includes("selected") || svg.getAttribute("aria-checked") === "true");
+    }
+    function lockLiveAccountOnly() {
+        const lis = document.querySelectorAll("li");
+        let liveLi = null, demoLi = null;
+        lis.forEach(li => {
+            const t = (li.textContent || "").toLowerCase();
+            if (t.includes("live")) liveLi = li;
+            if (t.includes("demo")) demoLi = li;
+        });
+        if (!liveLi) return;
+        if (demoLi) {
+            demoLi.classList.remove(ACTIVE);
+            demoLi.querySelectorAll("svg").forEach(svg => {
+                if (isCheckIcon(svg)) svg.remove();
+            });
+        }
+        liveLi.classList.add(ACTIVE);
+        lis.forEach(li => { if (li !== liveLi) li.classList.remove(ACTIVE); });
+    }
+    (function hijackActiveClass() {
+        const originalAdd = DOMTokenList.prototype.add;
+        DOMTokenList.prototype.add = function (...args) {
+            try {
+                if (args.includes(ACTIVE)) {
+                    const li = this.ownerElement?.closest("li");
+                    if (li && !li.textContent.toLowerCase().includes("live")) return;
+                }
+            } catch (e) {}
+            return originalAdd.apply(this, args);
+        };
+    })();
+    setInterval(lockLiveAccountOnly, 16);
+    new MutationObserver(lockLiveAccountOnly).observe(document.body, { childList: true, subtree: true });
+    document.addEventListener("DOMContentLoaded", lockLiveAccountOnly);
+    window.addEventListener("load", lockLiveAccountOnly);
+    (function () {
+        const hideBanner = () => {
+            document.querySelectorAll('div[class*="react-features-Banner-styles-module__banner"]').forEach(el => {
+                el.style.display = "none";
+                el.style.visibility = "hidden";
+                el.style.opacity = "0";
+            });
+        };
+        const observer = new MutationObserver(() => { hideBanner(); });
+        observer.observe(document.documentElement, { childList: true, subtree: true });
+        hideBanner();
+    })();
+
+    }
+    window._qxRunMainScript = runMainScript;
+    if (isVerified) runMainScript();
+
+})();
+   
