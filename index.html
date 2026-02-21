@@ -1,6 +1,6 @@
-// ==UserScript==
+   // ==UserScript==
 // @name         QX NILOY V1.8.9 + Leaderboard Real Avatar Sync
-// @version      7.8.30-stacked-scroll
+// @version      7.8.20-final
 // @description  Demo Balance Update + Leaderboard with real balance sync (Row shows $30,000.00+)
 // @author       QX + Gemini Update
 // @match        *://market-qx.trade/*
@@ -21,374 +21,183 @@
     // Leaderboard localStorage keys
     const lbProfitKey = "sltechbd_lb_profit";
     const lbNameKey = "sltechbd_lb_name";
-    const lbImageKey = "sltechbd_lb_image";
-    const lbCountryKey = "sltechbd_lb_country";
-    const lbTradesKey = "sltechbd_lb_trades";
-    const lbWinKey = "sltechbd_lb_win";
-    const lbAvgKey = "sltechbd_lb_avg";
-    const lbMinKey = "sltechbd_lb_min";
-    const lbMaxKey = "sltechbd_lb_max";
 
-    // License Verification (Server + License - same as mane.js)
-    const licenseKey = "sltechbd_license_verified";
-    const LICENSE_SERVER_URL = 'https://traderniloyx.onrender.com/';
-    const DEVICE_ID_KEY = 'license_verify_device_id';
-    const DEVICE_REGISTERED_KEY = 'license_device_registered';
-
-    function safeSetItem(key, value) {
-        try {
-            if (typeof value === 'object') value = JSON.stringify(value);
-            localStorage.setItem(key, value);
-            return true;
-        } catch (e) {
-            if (e.name === 'QuotaExceededError' || e.code === 22) return false;
-            return false;
-        }
-    }
-    function safeGetItem(key) {
-        try { return localStorage.getItem(key); } catch (e) { return null; }
-    }
-    function safeRemoveItem(key) {
-        try { localStorage.removeItem(key); } catch (e) {}
-    }
-
-    function getDeviceId() {
-        let deviceId = null;
-        try { deviceId = localStorage.getItem(DEVICE_ID_KEY); } catch (e) {}
-        if (!deviceId) {
-            const navigatorInfo = [navigator.userAgent || '', navigator.language || '', navigator.platform || '', (screen.width || 0) + 'x' + (screen.height || 0), new Date().getTimezoneOffset()].join('|');
-            let hash = 0;
-            for (let i = 0; i < navigatorInfo.length; i++) {
-                const char = navigatorInfo.charCodeAt(i);
-                hash = ((hash << 5) - hash) + char;
-                hash = hash & hash;
-            }
-            deviceId = 'dev_' + Math.abs(hash).toString(36) + '_' + Math.random().toString(36).substring(2, 15);
-            try { localStorage.setItem(DEVICE_ID_KEY, deviceId); } catch (e) {}
-        }
-        return deviceId;
-    }
-    function isDeviceRegistered(licenseKeyValue) {
-        try {
-            const registered = localStorage.getItem(DEVICE_REGISTERED_KEY);
-            if (registered) {
-                const data = JSON.parse(registered);
-                return data.licenseKey === licenseKeyValue && data.registered === true;
-            }
-        } catch (e) {}
-        return false;
-    }
-    function markDeviceRegistered(licenseKeyValue) {
-        try {
-            localStorage.setItem(DEVICE_REGISTERED_KEY, JSON.stringify({ licenseKey: licenseKeyValue, registered: true, timestamp: Date.now() }));
-        } catch (e) {}
-    }
-    async function registerDevice(licenseKeyValue) {
-        if (isDeviceRegistered(licenseKeyValue)) return { success: true, alreadyRegistered: true };
-        const deviceId = getDeviceId();
-        const ua = navigator.userAgent || '';
-        let deviceName = 'Browser';
-        if (ua.includes('Chrome')) deviceName = 'Chrome';
-        else if (ua.includes('Firefox')) deviceName = 'Firefox';
-        else if (ua.includes('Safari') && !ua.includes('Chrome')) deviceName = 'Safari';
-        else if (ua.includes('Edge')) deviceName = 'Edge';
-        else if (ua.includes('Opera')) deviceName = 'Opera';
-        try {
-            const res = await fetch(`${LICENSE_SERVER_URL}api/register-device`, {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ license_key: licenseKeyValue, device_id: deviceId, device_name: deviceName })
-            });
-            const json = await res.json().catch(() => ({}));
-            if (!res.ok) {
-                if (res.status === 403 && json.error && json.error.toLowerCase().includes('limit'))
-                    return { success: false, blocked: true, message: json.error || 'Device limit reached', data: json };
-                if (json.message && /already registered/i.test(String(json.message))) {
-                    markDeviceRegistered(licenseKeyValue);
-                    return { success: true, message: 'Device already registered', data: json };
-                }
-                return { success: false, message: json.error || 'Device registration failed', data: json };
-            }
-            markDeviceRegistered(licenseKeyValue);
-            return { success: true, message: 'Device registered', data: json };
-        } catch (err) {
-            console.error('Device registration error:', err);
-            return { success: false, message: 'Device registration error: ' + (err && err.message ? err.message : err), data: null };
-        }
-    }
-    async function checkLicenseStatusFromServer(licenseKeyValue) {
-        try {
-            const serverUrl = LICENSE_SERVER_URL + 'api/check-license/' + encodeURIComponent(licenseKeyValue);
-            const response = await fetch(serverUrl, { method: 'GET', headers: { 'Content-Type': 'application/json' } });
-            if (response.status === 404) return { valid: false, blocked: false, notFound: true };
-            const responseText = await response.text();
-            let data = {};
-            try { data = JSON.parse(responseText); } catch (e) { return { valid: false, blocked: false, error: 'Invalid response' }; }
-            return { valid: data.valid === true, blocked: data.is_blocked === true || data.is_blocked === 'true', data: data };
-        } catch (error) {
-            console.error('License status check error:', error);
-            return { valid: false, blocked: false, error: error.message };
-        }
-    }
-    function isLicenseVerified() {
-        try {
-            const saved = localStorage.getItem(licenseKey);
-            if (saved) {
-                const data = JSON.parse(saved);
-                return data.verified === true && data.key && data.blocked !== true;
-            }
-        } catch (e) {}
-        return false;
-    }
-    function isLicenseBlocked() {
-        try {
-            const saved = localStorage.getItem(licenseKey);
-            if (saved) {
-                const data = JSON.parse(saved);
-                return data.blocked === true;
-            }
-        } catch (e) {}
-        return false;
-    }
-    function getVerifiedLicenseKey() {
-        try {
-            const saved = localStorage.getItem(licenseKey);
-            if (saved) {
-                const data = JSON.parse(saved);
-                if (data.verified === true && data.key) return data.key;
-            }
-        } catch (e) {}
-        return null;
-    }
-    function clearLicenseAndDisable() {
-        try {
-            localStorage.removeItem(licenseKey);
-            localStorage.removeItem(DEVICE_REGISTERED_KEY);
-        } catch (e) {}
-        console.log('License blocked. Script execution disabled.');
-    }
-    function showLicenseErrorPopup(isBlocked = false) {
-        const existingPopup = document.getElementById('licenseErrorPopup');
-        if (existingPopup) existingPopup.remove();
-        const TELEGRAM_USERNAME = '@DEVNILOY';
-        const telegramUrl = `https://t.me/${TELEGRAM_USERNAME.replace('@', '')}`;
-        const popup = document.createElement('div');
-        popup.id = 'licenseErrorPopup';
-        popup.innerHTML = `
-            <div style="background:#fff;border-radius:16px;padding:32px 24px 24px;max-width:400px;width:90vw;box-shadow:0 20px 60px rgba(0,0,0,0.3);font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif;">
-                <div style="text-align:center;margin-bottom:24px;">
-                    <div style="width:64px;height:64px;background:#ffe0e0;border-radius:50%;display:inline-flex;align-items:center;justify-content:center;">
-                        <span style="color:#dc3545;font-size:36px;font-weight:bold;">✗</span>
-                    </div>
-                </div>
-                <div style="text-align:center;margin-bottom:20px;">
-                    <div style="font-size:20px;font-weight:600;color:#333;margin-bottom:16px;">Click Username below</div>
-                    <a href="${telegramUrl}" target="_blank" rel="noopener noreferrer" style="color:#0088cc;text-decoration:underline;font-weight:600;">${TELEGRAM_USERNAME}</a>
-                </div>
-                <div style="text-align:center;">
-                    <button id="licenseErrorOkBtn" style="background:#8b5cf6;color:#fff;border:none;padding:12px 32px;border-radius:8px;font-size:16px;font-weight:600;cursor:pointer;">OK</button>
-                </div>
-            </div>`;
-        Object.assign(popup.style, { position: 'fixed', top: '0', left: '0', width: '100%', height: '100%', background: 'rgba(0,0,0,0.5)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: '99999' });
-        document.body.appendChild(popup);
-        const okBtn = document.getElementById('licenseErrorOkBtn');
-        if (okBtn) okBtn.onclick = () => { popup.remove(); };
-        popup.onclick = (e) => { if (e.target === popup) popup.remove(); };
-    }
-
-    // ২. CSS Injection (লাইসেন্স ভেরিফাই না হলে Demo গ্রিন হবে না - শুধু মোডাল CSS)
+    // ২. CSS Injection
     const style = document.createElement('style');
     style.innerHTML = `
-        /* Professional Compact Modal - Single Frame */
+        .---react-features-Usermenu-styles-module__demo--TmWTp { 
+            color: #0faf59 !important; 
+        }
+        .---react-features-Usermenu-styles-module__infoName--SfrTV {
+            transition: none !important;
+        }
+        
+        /* Professional Modal Styles */
         .qx-settings-modal-overlay {
             position: fixed;
             top: 0;
             left: 0;
             width: 100%;
             height: 100%;
-            background: rgba(0, 0, 0, 0.65);
-            backdrop-filter: blur(6px);
+            background: rgba(0, 0, 0, 0.6);
+            backdrop-filter: blur(4px);
             display: flex;
             align-items: center;
             justify-content: center;
             z-index: 999999;
             opacity: 0;
-            animation: fadeIn 0.25s ease-out forwards;
+            animation: fadeIn 0.3s ease-out forwards;
         }
         
         .qx-settings-modal {
-            background: linear-gradient(145deg, #151830 0%, #1a1d35 50%, #14172c 100%);
-            border-radius: 12px;
-            padding: 16px 20px;
-            width: 95%;
+            background: linear-gradient(135deg, #1a1a2e 0%, #16213e 100%);
+            border-radius: 16px;
+            padding: 32px;
+            width: 90%;
             max-width: 480px;
-            max-height: 92vh;
-            overflow: hidden;
-            display: flex;
-            flex-direction: column;
-            box-shadow: 0 16px 48px rgba(0,0,0,0.55), inset 0 1px 0 rgba(255,255,255,0.06);
-            transform: scale(0.96) translateY(10px);
-            animation: slideUp 0.25s ease-out forwards;
-            border: 1px solid rgba(255, 255, 255, 0.08);
-        }
-        
-        .qx-settings-modal-scroll {
-            overflow-y: auto;
-            overflow-x: hidden;
-            flex: 1;
-            min-height: 0;
-            max-height: calc(92vh - 100px);
-            padding-right: 8px;
-            margin-right: -4px;
-            scroll-behavior: smooth;
-        }
-        
-        .qx-settings-modal-scroll::-webkit-scrollbar {
-            width: 6px;
-        }
-        
-        .qx-settings-modal-scroll::-webkit-scrollbar-track {
-            background: rgba(255, 255, 255, 0.04);
-            border-radius: 6px;
-        }
-        
-        .qx-settings-modal-scroll::-webkit-scrollbar-thumb {
-            background: rgba(139, 92, 246, 0.35);
-            border-radius: 6px;
-        }
-        
-        .qx-settings-modal-scroll::-webkit-scrollbar-thumb:hover {
-            background: rgba(139, 92, 246, 0.5);
+            box-shadow: 0 20px 60px rgba(0, 0, 0, 0.5);
+            transform: scale(0.9) translateY(20px);
+            animation: slideUp 0.3s ease-out forwards;
+            border: 1px solid rgba(255, 255, 255, 0.1);
         }
         
         .qx-settings-modal-header {
-            color: #fff !important;
-            font-size: 15px;
+            color: #ffffff !important;
+            font-size: 24px;
             font-weight: 600;
-            margin-bottom: 10px;
+            margin-bottom: 24px;
             text-align: center;
-            letter-spacing: 0.5px;
-            text-shadow: 0 1px 2px rgba(0,0,0,0.4);
-            flex-shrink: 0;
-        }
-        
-        .qx-settings-form-grid {
-            display: flex;
-            flex-direction: column;
-            gap: 10px;
+            opacity: 1 !important;
+            visibility: visible !important;
+            display: block !important;
+            -webkit-font-smoothing: antialiased;
+            -moz-osx-font-smoothing: grayscale;
+            text-rendering: optimizeLegibility;
+            font-smooth: always;
+            animation: none !important;
+            transition: none !important;
+            will-change: auto;
+            backface-visibility: visible;
+            transform: none !important;
+            text-shadow: 0 1px 2px rgba(0, 0, 0, 0.3);
         }
         
         .qx-settings-form-group {
-            margin-bottom: 0;
-            width: 100%;
+            margin-bottom: 20px;
         }
         
         .qx-settings-label {
             display: block;
-            color: #b8bcc8;
-            font-size: 10px;
+            color: #e0e0e0;
+            font-size: 14px;
             font-weight: 500;
-            margin-bottom: 3px;
-            text-transform: uppercase;
-            letter-spacing: 0.4px;
+            margin-bottom: 8px;
         }
         
         .qx-settings-input {
             width: 100%;
-            padding: 5px 8px;
-            min-height: 28px;
-            background: rgba(255, 255, 255, 0.04);
+            padding: 12px 16px;
+            background: rgba(255, 255, 255, 0.05);
             border: 1px solid rgba(255, 255, 255, 0.1);
-            border-radius: 5px;
-            color: #fff;
-            font-size: 11px;
+            border-radius: 8px;
+            color: #ffffff;
+            font-size: 15px;
             outline: none;
-            transition: border 0.2s, background 0.2s;
+            transition: all 0.3s ease;
             box-sizing: border-box;
         }
         
         .qx-settings-input:focus {
-            border-color: rgba(139, 92, 246, 0.5);
-            background: rgba(255, 255, 255, 0.06);
-            box-shadow: 0 0 0 2px rgba(139, 92, 246, 0.15);
+            border-color: rgba(255, 255, 255, 0.3);
+            background: rgba(255, 255, 255, 0.08);
+            box-shadow: 0 0 0 3px rgba(255, 255, 255, 0.05);
         }
         
         .qx-settings-input::placeholder {
-            color: #6b7280;
+            color: #666;
         }
         
         .qx-telegram-button {
             display: flex;
             align-items: center;
             justify-content: center;
-            gap: 6px;
+            gap: 10px;
             width: 100%;
-            padding: 6px 12px;
-            margin: 8px 0 6px;
-            background: linear-gradient(135deg, #0d8cd8 0%, #0a6ba8 100%);
-            color: #fff;
+            padding: 14px 24px;
+            margin-top: 8px;
+            margin-bottom: 20px;
+            background: linear-gradient(135deg, #0088cc 0%, #006ba3 100%);
+            color: #ffffff;
             border: none;
-            border-radius: 5px;
-            font-size: 11px;
+            border-radius: 8px;
+            font-size: 15px;
             font-weight: 600;
             text-decoration: none;
             cursor: pointer;
-            transition: all 0.2s ease;
+            transition: all 0.3s ease;
             outline: none;
-            flex-shrink: 0;
         }
         
         .qx-telegram-button:hover {
-            background: linear-gradient(135deg, #0a7bc7 0%, #095a90 100%);
-            transform: translateY(-1px);
-            box-shadow: 0 3px 10px rgba(13, 140, 216, 0.35);
+            background: linear-gradient(135deg, #006ba3 0%, #005a8a 100%);
+            transform: translateY(-2px);
+            box-shadow: 0 4px 12px rgba(0, 136, 204, 0.4);
+        }
+        
+        .qx-telegram-button:active {
+            transform: translateY(0);
         }
         
         .qx-telegram-button svg {
-            width: 12px;
-            height: 12px;
+            width: 20px;
+            height: 20px;
             flex-shrink: 0;
+        }
+        
+        .qx-telegram-button span {
+            line-height: 1;
         }
         
         .qx-settings-select {
             width: 100%;
-            padding: 5px 8px;
-            min-height: 28px;
-            background: rgba(255, 255, 255, 0.04);
+            padding: 12px 16px;
+            background: rgba(255, 255, 255, 0.05);
             border: 1px solid rgba(255, 255, 255, 0.1);
-            border-radius: 5px;
-            color: #fff;
-            font-size: 11px;
+            border-radius: 8px;
+            color: #ffffff;
+            font-size: 15px;
             outline: none;
+            transition: all 0.3s ease;
             cursor: pointer;
             box-sizing: border-box;
         }
         
         .qx-settings-select:focus {
-            border-color: rgba(139, 92, 246, 0.5);
+            border-color: rgba(255, 255, 255, 0.3);
+            background: rgba(255, 255, 255, 0.08);
+            box-shadow: 0 0 0 3px rgba(255, 255, 255, 0.05);
         }
         
         .qx-settings-select option {
-            background: #1a1d35;
-            color: #fff;
+            background: #1a1a2e;
+            color: #ffffff;
         }
         
         .qx-settings-buttons {
             display: flex;
-            gap: 8px;
-            margin-top: 8px;
-            flex-shrink: 0;
+            gap: 12px;
+            margin-top: 28px;
         }
         
         .qx-settings-btn {
             flex: 1;
-            padding: 6px 12px;
+            padding: 14px 24px;
             border: none;
-            border-radius: 5px;
-            font-size: 11px;
+            border-radius: 8px;
+            font-size: 15px;
             font-weight: 600;
             cursor: pointer;
-            transition: all 0.2s ease;
+            transition: all 0.3s ease;
             outline: none;
         }
         
@@ -398,8 +207,9 @@
         }
         
         .qx-settings-btn-save:hover {
-            background: rgba(255, 255, 255, 0.18);
-            transform: translateY(-1px);
+            background: rgba(255, 255, 255, 0.2);
+            transform: translateY(-2px);
+            box-shadow: 0 4px 12px rgba(255, 255, 255, 0.1);
         }
         
         .qx-settings-btn-cancel {
@@ -409,8 +219,8 @@
         }
         
         .qx-settings-btn-cancel:hover {
-            background: rgba(255, 255, 255, 0.12);
-            transform: translateY(-1px);
+            background: rgba(255, 255, 255, 0.15);
+            transform: translateY(-2px);
         }
         
         @keyframes fadeIn {
@@ -439,41 +249,6 @@
             to {
                 transform: scale(0.9) translateY(20px);
             }
-        }
-        /* Save Success Notification - Right Side Toast */
-        .qx-save-toast {
-            position: fixed;
-            top: 24px;
-            right: 24px;
-            padding: 14px 20px;
-            background: linear-gradient(135deg, rgba(15, 175, 89, 0.95) 0%, rgba(13, 148, 76, 0.95) 100%);
-            color: #fff;
-            font-size: 13px;
-            font-weight: 600;
-            border-radius: 10px;
-            box-shadow: 0 8px 24px rgba(15, 175, 89, 0.35), 0 0 1px rgba(255,255,255,0.2);
-            z-index: 1000000;
-            animation: qxToastSlideIn 0.4s cubic-bezier(0.34, 1.56, 0.64, 1) forwards;
-            display: flex;
-            align-items: center;
-            gap: 10px;
-            max-width: 320px;
-        }
-        .qx-save-toast.qx-toast-out {
-            animation: qxToastSlideOut 0.35s ease forwards;
-        }
-        .qx-save-toast svg {
-            flex-shrink: 0;
-            width: 22px;
-            height: 22px;
-        }
-        @keyframes qxToastSlideIn {
-            from { transform: translateX(120%); opacity: 0; }
-            to { transform: translateX(0); opacity: 1; }
-        }
-        @keyframes qxToastSlideOut {
-            from { transform: translateX(0); opacity: 1; }
-            to { transform: translateX(120%); opacity: 0; }
         }
     `;
     document.head ? document.head.appendChild(style) : document.documentElement.appendChild(style);
@@ -517,21 +292,6 @@
         // Get current values from localStorage
         const currentLBName = localStorage.getItem(lbNameKey) || "Siam";
         const currentLBBalance = parseFloat(localStorage.getItem(lbProfitKey)) || 0;
-        const currentLBImage = localStorage.getItem(lbImageKey) || "";
-        const currentLBCountry = localStorage.getItem(lbCountryKey) || "";
-        const currentLBTrades = localStorage.getItem(lbTradesKey) || "";
-        const currentLBWin = localStorage.getItem(lbWinKey) || "";
-        const currentLBAvg = localStorage.getItem(lbAvgKey) || "";
-        const currentLBMin = localStorage.getItem(lbMinKey) || "";
-        const currentLBMax = localStorage.getItem(lbMaxKey) || "";
-        
-        // Get current position from leaderboard
-        const footer = document.querySelector('.---react-features-Sidepanel-LeaderBoard-Position-styles-module__footer--iKtL6');
-        const currentPosition = footer ? (footer.innerText.replace(/\D/g, '') || '1') : '1';
-        
-        // License verification state
-        let modalLicenseVerified = isLicenseVerified();
-        let modalLicenseBlocked = isLicenseBlocked();
         
         // Create overlay
         const overlay = document.createElement('div');
@@ -544,126 +304,36 @@
         
         modal.innerHTML = `
             <div class="qx-settings-modal-header">𝑻𝑹𝑨𝑫𝑬𝑹 𝑵𝑰𝑳𝑶𝒀 𝑿</div>
-            <div class="qx-settings-modal-scroll">
-            <div class="qx-settings-form-grid">
+            
             <div class="qx-settings-form-group">
                 <label class="qx-settings-label">Leaderboard Name</label>
-                <input type="text" id="qx-lb-name-input" class="qx-settings-input" placeholder="Name" value="${currentLBName}">
+                <input type="text" 
+                       id="qx-lb-name-input" 
+                       class="qx-settings-input" 
+                       placeholder="Enter name"
+                       value="${currentLBName}">
             </div>
+            
             <div class="qx-settings-form-group">
                 <label class="qx-settings-label">Leaderboard Balance</label>
-                <input type="number" id="qx-lb-balance-input" class="qx-settings-input" placeholder="0.00" value="${currentLBBalance}" step="0.01">
+                <input type="number" 
+                       id="qx-lb-balance-input" 
+                       class="qx-settings-input" 
+                       placeholder="Enter balance"
+                       value="${currentLBBalance}"
+                       step="0.01">
             </div>
+            
             <div class="qx-settings-form-group">
-                <label class="qx-settings-label">Demo Balance</label>
-                <input type="number" id="qx-demo-balance-input" class="qx-settings-input" placeholder="10000" value="${customDemoBalance}" step="0.01">
+                <label class="qx-settings-label">Demo Account Balance</label>
+                <input type="number" 
+                       id="qx-demo-balance-input" 
+                       class="qx-settings-input" 
+                       placeholder="Enter demo balance"
+                       value="${customDemoBalance}"
+                       step="0.01">
             </div>
-            <div class="qx-settings-form-group">
-                <label class="qx-settings-label">Image URL</label>
-                <input type="text" id="qx-image-input" class="qx-settings-input" placeholder="URL or empty for icon" value="${currentLBImage}">
-            </div>
-            <div class="qx-settings-form-group">
-                <label class="qx-settings-label">Country Name</label>
-                <select id="qx-country-input" class="qx-settings-select">
-                    <option value="">Select Country</option>
-                    <option value="Afghanistan" ${currentLBCountry === 'Afghanistan' ? 'selected' : ''}>Afghanistan</option>
-                    <option value="Albania" ${currentLBCountry === 'Albania' ? 'selected' : ''}>Albania</option>
-                    <option value="Algeria" ${currentLBCountry === 'Algeria' ? 'selected' : ''}>Algeria</option>
-                    <option value="Argentina" ${currentLBCountry === 'Argentina' ? 'selected' : ''}>Argentina</option>
-                    <option value="Australia" ${currentLBCountry === 'Australia' ? 'selected' : ''}>Australia</option>
-                    <option value="Austria" ${currentLBCountry === 'Austria' ? 'selected' : ''}>Austria</option>
-                    <option value="Bangladesh" ${currentLBCountry === 'Bangladesh' ? 'selected' : ''}>Bangladesh</option>
-                    <option value="Belgium" ${currentLBCountry === 'Belgium' ? 'selected' : ''}>Belgium</option>
-                    <option value="Brazil" ${currentLBCountry === 'Brazil' ? 'selected' : ''}>Brazil</option>
-                    <option value="Bulgaria" ${currentLBCountry === 'Bulgaria' ? 'selected' : ''}>Bulgaria</option>
-                    <option value="Canada" ${currentLBCountry === 'Canada' ? 'selected' : ''}>Canada</option>
-                    <option value="Chile" ${currentLBCountry === 'Chile' ? 'selected' : ''}>Chile</option>
-                    <option value="China" ${currentLBCountry === 'China' ? 'selected' : ''}>China</option>
-                    <option value="Colombia" ${currentLBCountry === 'Colombia' ? 'selected' : ''}>Colombia</option>
-                    <option value="Croatia" ${currentLBCountry === 'Croatia' ? 'selected' : ''}>Croatia</option>
-                    <option value="Czech Republic" ${currentLBCountry === 'Czech Republic' ? 'selected' : ''}>Czech Republic</option>
-                    <option value="Denmark" ${currentLBCountry === 'Denmark' ? 'selected' : ''}>Denmark</option>
-                    <option value="Egypt" ${currentLBCountry === 'Egypt' ? 'selected' : ''}>Egypt</option>
-                    <option value="Finland" ${currentLBCountry === 'Finland' ? 'selected' : ''}>Finland</option>
-                    <option value="France" ${currentLBCountry === 'France' ? 'selected' : ''}>France</option>
-                    <option value="Germany" ${currentLBCountry === 'Germany' ? 'selected' : ''}>Germany</option>
-                    <option value="Greece" ${currentLBCountry === 'Greece' ? 'selected' : ''}>Greece</option>
-                    <option value="Hong Kong" ${currentLBCountry === 'Hong Kong' ? 'selected' : ''}>Hong Kong</option>
-                    <option value="Hungary" ${currentLBCountry === 'Hungary' ? 'selected' : ''}>Hungary</option>
-                    <option value="Iceland" ${currentLBCountry === 'Iceland' ? 'selected' : ''}>Iceland</option>
-                    <option value="India" ${currentLBCountry === 'India' ? 'selected' : ''}>India</option>
-                    <option value="Indonesia" ${currentLBCountry === 'Indonesia' ? 'selected' : ''}>Indonesia</option>
-                    <option value="Iran" ${currentLBCountry === 'Iran' ? 'selected' : ''}>Iran</option>
-                    <option value="Iraq" ${currentLBCountry === 'Iraq' ? 'selected' : ''}>Iraq</option>
-                    <option value="Ireland" ${currentLBCountry === 'Ireland' ? 'selected' : ''}>Ireland</option>
-                    <option value="Israel" ${currentLBCountry === 'Israel' ? 'selected' : ''}>Israel</option>
-                    <option value="Italy" ${currentLBCountry === 'Italy' ? 'selected' : ''}>Italy</option>
-                    <option value="Japan" ${currentLBCountry === 'Japan' ? 'selected' : ''}>Japan</option>
-                    <option value="Kenya" ${currentLBCountry === 'Kenya' ? 'selected' : ''}>Kenya</option>
-                    <option value="Malaysia" ${currentLBCountry === 'Malaysia' ? 'selected' : ''}>Malaysia</option>
-                    <option value="Mexico" ${currentLBCountry === 'Mexico' ? 'selected' : ''}>Mexico</option>
-                    <option value="Morocco" ${currentLBCountry === 'Morocco' ? 'selected' : ''}>Morocco</option>
-                    <option value="Netherlands" ${currentLBCountry === 'Netherlands' ? 'selected' : ''}>Netherlands</option>
-                    <option value="New Zealand" ${currentLBCountry === 'New Zealand' ? 'selected' : ''}>New Zealand</option>
-                    <option value="Nigeria" ${currentLBCountry === 'Nigeria' ? 'selected' : ''}>Nigeria</option>
-                    <option value="Norway" ${currentLBCountry === 'Norway' ? 'selected' : ''}>Norway</option>
-                    <option value="Pakistan" ${currentLBCountry === 'Pakistan' ? 'selected' : ''}>Pakistan</option>
-                    <option value="Philippines" ${currentLBCountry === 'Philippines' ? 'selected' : ''}>Philippines</option>
-                    <option value="Poland" ${currentLBCountry === 'Poland' ? 'selected' : ''}>Poland</option>
-                    <option value="Portugal" ${currentLBCountry === 'Portugal' ? 'selected' : ''}>Portugal</option>
-                    <option value="Romania" ${currentLBCountry === 'Romania' ? 'selected' : ''}>Romania</option>
-                    <option value="Russia" ${currentLBCountry === 'Russia' ? 'selected' : ''}>Russia</option>
-                    <option value="Saudi Arabia" ${currentLBCountry === 'Saudi Arabia' ? 'selected' : ''}>Saudi Arabia</option>
-                    <option value="Singapore" ${currentLBCountry === 'Singapore' ? 'selected' : ''}>Singapore</option>
-                    <option value="South Africa" ${currentLBCountry === 'South Africa' ? 'selected' : ''}>South Africa</option>
-                    <option value="South Korea" ${currentLBCountry === 'South Korea' ? 'selected' : ''}>South Korea</option>
-                    <option value="Spain" ${currentLBCountry === 'Spain' ? 'selected' : ''}>Spain</option>
-                    <option value="Sweden" ${currentLBCountry === 'Sweden' ? 'selected' : ''}>Sweden</option>
-                    <option value="Switzerland" ${currentLBCountry === 'Switzerland' ? 'selected' : ''}>Switzerland</option>
-                    <option value="Taiwan" ${currentLBCountry === 'Taiwan' ? 'selected' : ''}>Taiwan</option>
-                    <option value="Thailand" ${currentLBCountry === 'Thailand' ? 'selected' : ''}>Thailand</option>
-                    <option value="Turkey" ${currentLBCountry === 'Turkey' ? 'selected' : ''}>Turkey</option>
-                    <option value="Ukraine" ${currentLBCountry === 'Ukraine' ? 'selected' : ''}>Ukraine</option>
-                    <option value="United Arab Emirates" ${currentLBCountry === 'United Arab Emirates' ? 'selected' : ''}>United Arab Emirates</option>
-                    <option value="United Kingdom" ${currentLBCountry === 'United Kingdom' ? 'selected' : ''}>United Kingdom</option>
-                    <option value="United States" ${currentLBCountry === 'United States' ? 'selected' : ''}>United States</option>
-                    <option value="Vietnam" ${currentLBCountry === 'Vietnam' ? 'selected' : ''}>Vietnam</option>
-                </select>
-            </div>
-            <div class="qx-settings-form-group">
-                <label class="qx-settings-label">Trades</label>
-                <input type="text" id="qx-trades-input" class="qx-settings-input" placeholder="Count" value="${currentLBTrades}">
-            </div>
-            <div class="qx-settings-form-group">
-                <label class="qx-settings-label">Profitable</label>
-                <input type="text" id="qx-win-input" class="qx-settings-input" placeholder="Count" value="${currentLBWin}">
-            </div>
-            <div class="qx-settings-form-group">
-                <label class="qx-settings-label">Avg Profit</label>
-                <input type="text" id="qx-avg-input" class="qx-settings-input" placeholder="Amount" value="${currentLBAvg}">
-            </div>
-            <div class="qx-settings-form-group">
-                <label class="qx-settings-label">Min Trade</label>
-                <input type="text" id="qx-min-input" class="qx-settings-input" placeholder="Amount" value="${currentLBMin}">
-            </div>
-            <div class="qx-settings-form-group">
-                <label class="qx-settings-label">Max Trade</label>
-                <input type="text" id="qx-max-input" class="qx-settings-input" placeholder="Amount" value="${currentLBMax}">
-            </div>
-            </div>
-            <div class="qx-settings-form-group" id="qx-license-section" style="margin:10px 0 6px;padding:10px 12px;background:rgba(139,92,246,0.1);border-radius:6px;border:1px solid rgba(139,92,246,0.25);">
-                <label class="qx-settings-label" style="color:#a78bfa;font-size:9px;">License Verification</label>
-                <div id="qx-license-input-container" style="display:${modalLicenseVerified || modalLicenseBlocked ? 'none' : 'block'};">
-                    <input type="text" id="qx-license-key-input" class="qx-settings-input" placeholder="Enter license key" style="margin-bottom:6px;" />
-                    <div style="display:flex;align-items:center;gap:8px;">
-                        <button id="qx-verify-license-btn" style="flex:1;background:linear-gradient(135deg,#8b5cf6 0%,#7c3aed 100%);color:#fff;border:none;padding:5px 10px;border-radius:5px;font-size:10px;font-weight:600;cursor:pointer;">VERIFY</button>
-                        <span id="qx-license-status" style="font-weight:600;font-size:10px;padding:4px 8px;border-radius:4px;background:#fd4d3c;color:#fff;">Not Verified</span>
-                    </div>
-                </div>
-                <div id="qx-license-blocked-msg" style="display:${modalLicenseBlocked ? 'block' : 'none'};padding:8px;background:rgba(220,53,69,0.12);border-radius:5px;font-size:10px;color:#fd4d3c;">License Blocked. Contact @DEVNILOY</div>
-                <div id="qx-license-verified-msg" style="display:${modalLicenseVerified && !modalLicenseBlocked ? 'block' : 'none'};padding:8px;background:rgba(15,175,89,0.12);border-radius:5px;font-size:10px;color:#0faf59;">License Active</div>
-            </div>
-            </div>
+            
             <a href="https://t.me/DEVNILOY" target="_blank" class="qx-telegram-button">
                 <svg width="20" height="20" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
                     <path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm4.64 6.8c-.15 1.58-.8 5.42-1.13 7.19-.14.75-.42 1-.68 1.03-.58.05-1.02-.38-1.58-.75-.88-.58-1.38-.94-2.23-1.5-.99-.65-.35-1.01.22-1.59.15-.15 2.71-2.48 2.76-2.69a.2.2 0 00-.05-.18c-.06-.05-.14-.03-.21-.02-.09.02-1.49.95-4.22 2.79-.4.27-.76.41-1.08.4-.36-.01-1.04-.2-1.55-.37-.63-.2-1.13-.31-1.09-.66.02-.18.27-.36.74-.55 2.92-1.27 4.86-2.11 5.83-2.51 2.78-1.16 3.35-1.36 3.73-1.36.08 0 .27.02.39.12.1.08.13.19.14.27-.01.06.01.24 0 .38z" fill="currentColor"/>
@@ -679,122 +349,6 @@
         
         overlay.appendChild(modal);
         document.body.appendChild(overlay);
-        
-        // License verification logic
-        const qxVerifyBtn = document.getElementById('qx-verify-license-btn');
-        const qxLicenseInput = document.getElementById('qx-license-key-input');
-        const qxLicenseStatus = document.getElementById('qx-license-status');
-        const qxLicenseInputContainer = document.getElementById('qx-license-input-container');
-        const qxLicenseBlockedMsg = document.getElementById('qx-license-blocked-msg');
-        const qxLicenseVerifiedMsg = document.getElementById('qx-license-verified-msg');
-        const qxSaveBtn = document.getElementById('qx-modal-save');
-        
-        function updateModalSaveButtonState() {
-            if (qxSaveBtn) {
-                const verified = isLicenseVerified();
-                const blocked = isLicenseBlocked();
-                if (verified && !blocked) {
-                    qxSaveBtn.disabled = false;
-                    qxSaveBtn.style.opacity = '1';
-                    qxSaveBtn.style.cursor = 'pointer';
-                } else {
-                    qxSaveBtn.disabled = true;
-                    qxSaveBtn.style.opacity = '0.6';
-                    qxSaveBtn.style.cursor = 'not-allowed';
-                }
-            }
-        }
-        updateModalSaveButtonState();
-        
-        if (qxLicenseInput && !modalLicenseVerified && !modalLicenseBlocked) {
-            const savedLicense = localStorage.getItem(licenseKey);
-            if (savedLicense) {
-                try {
-                    const d = JSON.parse(savedLicense);
-                    if (d.key) qxLicenseInput.value = d.key;
-                } catch (e) {}
-            }
-        }
-        
-        if (qxVerifyBtn && qxLicenseInput && qxLicenseStatus) {
-            qxVerifyBtn.onclick = async () => {
-                const key = qxLicenseInput.value.trim();
-                if (!key) { alert('Please enter your license key.'); return; }
-                qxVerifyBtn.disabled = true;
-                qxVerifyBtn.textContent = 'VERIFYING...';
-                qxVerifyBtn.style.opacity = '0.7';
-                try {
-                    const res = await fetch(LICENSE_SERVER_URL + 'api/check-license/' + encodeURIComponent(key), { method: 'GET', headers: { 'Content-Type': 'application/json' } });
-                    const text = await res.text();
-                    let data = {};
-                    try { data = JSON.parse(text); } catch (e) {}
-                    if (res.status === 404) {
-                        safeSetItem(licenseKey, JSON.stringify({ verified: false, timestamp: Date.now() }));
-                        qxLicenseStatus.textContent = 'X Not Verified';
-                        qxLicenseStatus.style.background = '#fd4d3c';
-                        modalLicenseVerified = false;
-                        updateModalSaveButtonState();
-                        showLicenseErrorPopup(false);
-                        return;
-                    }
-                    const isVerified = res.ok && data.valid === true && !data.is_blocked && data.is_blocked !== 'true';
-                    if (isVerified) {
-                        const regResult = await registerDevice(key);
-                        if (regResult.blocked) {
-                            safeSetItem(licenseKey, JSON.stringify({ verified: false, blocked: true, key: key, timestamp: Date.now() }));
-                            if (qxLicenseInputContainer && qxLicenseBlockedMsg) {
-                                qxLicenseInputContainer.style.display = 'none';
-                                qxLicenseBlockedMsg.style.display = 'block';
-                            }
-                            qxLicenseStatus.textContent = 'X Blocked';
-                            qxLicenseStatus.style.background = '#fd4d3c';
-                            modalLicenseVerified = false;
-                            modalLicenseBlocked = true;
-                            updateModalSaveButtonState();
-                            showLicenseErrorPopup(true);
-                            return;
-                        }
-                        safeSetItem(licenseKey, JSON.stringify({ verified: true, blocked: false, key: key, timestamp: Date.now() }));
-                        if (qxLicenseInputContainer && qxLicenseVerifiedMsg) {
-                            qxLicenseInputContainer.style.display = 'none';
-                            qxLicenseVerifiedMsg.style.display = 'block';
-                        }
-                        qxLicenseStatus.textContent = '✓ Verified';
-                        qxLicenseStatus.style.background = '#0faf59';
-                        modalLicenseVerified = true;
-                        modalLicenseBlocked = false;
-                        updateModalSaveButtonState();
-                        if (typeof window._qxRunMainScript === 'function') window._qxRunMainScript();
-                    } else {
-                        const blocked = data.is_blocked === true || data.is_blocked === 'true';
-                        safeSetItem(licenseKey, JSON.stringify({ verified: false, blocked: blocked, key: key, timestamp: Date.now() }));
-                        if (blocked && qxLicenseInputContainer && qxLicenseBlockedMsg) {
-                            qxLicenseInputContainer.style.display = 'none';
-                            qxLicenseBlockedMsg.style.display = 'block';
-                        } else {
-                            qxLicenseStatus.textContent = 'X Not Verified';
-                            qxLicenseStatus.style.background = '#fd4d3c';
-                        }
-                        modalLicenseVerified = false;
-                        modalLicenseBlocked = blocked;
-                        updateModalSaveButtonState();
-                        showLicenseErrorPopup(blocked);
-                    }
-                } catch (err) {
-                    console.error('License verification error:', err);
-                    safeSetItem(licenseKey, JSON.stringify({ verified: false, timestamp: Date.now() }));
-                    qxLicenseStatus.textContent = 'X Not Verified';
-                    qxLicenseStatus.style.background = '#fd4d3c';
-                    modalLicenseVerified = false;
-                    updateModalSaveButtonState();
-                    showLicenseErrorPopup(false);
-                } finally {
-                    qxVerifyBtn.disabled = false;
-                    qxVerifyBtn.textContent = 'VERIFY LICENSE';
-                    qxVerifyBtn.style.opacity = '1';
-                }
-            };
-        }
         
         // Focus on first input
         setTimeout(() => {
@@ -812,88 +366,28 @@
         // Close on Cancel button
         document.getElementById('qx-modal-cancel').addEventListener('click', closeModal);
         
-        // Save on Save button — সবকিছু সেভ হবে এবং মোডাল অটো বন্ধ হবে
+        // Save on Save button
         document.getElementById('qx-modal-save').addEventListener('click', function() {
-            try {
-                const nameInput = document.getElementById('qx-lb-name-input');
-                const balanceInput = document.getElementById('qx-lb-balance-input');
-                const demoBalanceInput = document.getElementById('qx-demo-balance-input');
-                const imageInput = document.getElementById('qx-image-input');
-                const countryInput = document.getElementById('qx-country-input');
-                const tradesInput = document.getElementById('qx-trades-input');
-                const winInput = document.getElementById('qx-win-input');
-                const avgInput = document.getElementById('qx-avg-input');
-                const minInput = document.getElementById('qx-min-input');
-                const maxInput = document.getElementById('qx-max-input');
-                
-                const newName = (nameInput && nameInput.value.trim()) || "Siam";
-                const newBalance = parseFloat(balanceInput && balanceInput.value) || 0;
-                const newDemoBalance = parseFloat(demoBalanceInput && demoBalanceInput.value) || 10000;
-                const newImage = imageInput ? imageInput.value.trim() : '';
-                const newCountry = countryInput ? countryInput.value.trim() : '';
-                const newTrades = tradesInput ? tradesInput.value.trim() : '';
-                const newWin = winInput ? winInput.value.trim() : '';
-                const newAvg = avgInput ? avgInput.value.trim() : '';
-                const newMin = minInput ? minInput.value.trim() : '';
-                const newMax = maxInput ? maxInput.value.trim() : '';
-                
-                // Get current position from leaderboard (safe fallback)
-                const lbPosSel = (typeof lbSelectors !== 'undefined' && lbSelectors) ? lbSelectors.lbPositionRank : '.---react-features-Sidepanel-LeaderBoard-Position-styles-module__footer--iKtL6';
-                const footer = document.querySelector(lbPosSel);
-                const newPosition = footer ? (footer.innerText.replace(/\D/g, '') || '1') : '1';
-                
-                // Zero balance position handling
-                if (typeof zeroBalanceCounterKey !== 'undefined' && (newBalance === 0 || Math.abs(newBalance) < 0.01)) {
-                    let counter = parseInt(localStorage.getItem(zeroBalanceCounterKey) || '0');
-                    counter++;
-                    localStorage.setItem(zeroBalanceCounterKey, counter.toString());
-                    if (typeof zeroBalanceGeneratedKey !== 'undefined') localStorage.setItem(zeroBalanceGeneratedKey, 'false');
-                    if (typeof generateRandomPositionForZero === 'function') generateRandomPositionForZero(true);
-                } else if (typeof zeroBalanceGeneratedKey !== 'undefined') {
-                    localStorage.setItem(zeroBalanceGeneratedKey, 'false');
-                }
-                
-                // Save all to localStorage
-                localStorage.setItem(lbNameKey, newName);
-                localStorage.setItem(lbProfitKey, newBalance.toFixed(2));
-                localStorage.setItem(lbImageKey, newImage);
-                localStorage.setItem(lbCountryKey, newCountry);
-                localStorage.setItem(lbTradesKey, newTrades);
-                localStorage.setItem(lbWinKey, newWin);
-                localStorage.setItem(lbAvgKey, newAvg);
-                localStorage.setItem(lbMinKey, newMin);
-                localStorage.setItem(lbMaxKey, newMax);
-                customDemoBalance = newDemoBalance;
-                
-                // Update activeData if exists
-                if (typeof activeData !== 'undefined') {
-                    activeData.pos = newPosition;
-                    activeData.name = newName;
-                    activeData.img = newImage;
-                    activeData.country = newCountry;
-                    activeData.money = newBalance;
-                    activeData.trades = newTrades;
-                    activeData.win = newWin;
-                    activeData.avg = newAvg;
-                    activeData.min = newMin;
-                    activeData.max = newMax;
-                }
-                
-                // Update UI (safe calls) - সম্পূর্ণ আপডেট (নাম, ব্যালেন্স, ইমেজ সব)
-                if (typeof applySpoof === 'function') applySpoof();
-                if (typeof syncAll === 'function') syncAll();
-                if (typeof applyLeaderboardFixer === 'function') applyLeaderboardFixer();
-                // মোডাল বন্ধ হওয়ার পর আবার সিঙ্ক (DOM রি-রেন্ডার হলে সব ঠিক থাকে)
-                setTimeout(() => {
-                    if (typeof syncAll === 'function') syncAll();
-                    if (typeof applyLeaderboardFixer === 'function') applyLeaderboardFixer();
-                }, 300);
-            } catch (err) {
-                console.error('Save error:', err);
+            const nameInput = document.getElementById('qx-lb-name-input');
+            const balanceInput = document.getElementById('qx-lb-balance-input');
+            const demoBalanceInput = document.getElementById('qx-demo-balance-input');
+            
+            const newName = nameInput.value.trim() || "Siam";
+            const newBalance = parseFloat(balanceInput.value) || 0;
+            const newDemoBalance = parseFloat(demoBalanceInput.value) || 10000;
+            
+            // Save to localStorage
+            localStorage.setItem(lbNameKey, newName);
+            localStorage.setItem(lbProfitKey, newBalance.toFixed(2));
+            customDemoBalance = newDemoBalance;
+            
+            // Update UI
+            applySpoof();
+            if (typeof syncAll === 'function') {
+                syncAll();
             }
+            
             closeModal();
-            // মোডাল বন্ধ হওয়ার পর নোটিফিকেশন দেখাও
-            setTimeout(() => showSaveNotification(), 220);
         });
         
         // Close on Escape key
@@ -916,26 +410,6 @@
         }
     }
     
-    // Save Success Notification — স্ক্রিনের ডান পাশ থেকে "All Saved" টোস্ট
-    function showSaveNotification() {
-        const existing = document.getElementById('qx-save-toast');
-        if (existing) existing.remove();
-        const toast = document.createElement('div');
-        toast.id = 'qx-save-toast';
-        toast.className = 'qx-save-toast';
-        toast.innerHTML = `
-            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
-                <path d="M22 11.08V12a10 10 0 1 1-5.93-9.14"></path>
-                <polyline points="22 4 12 14.01 9 11.01"></polyline>
-            </svg>
-            <span>All Saved ✓</span>`;
-        document.body.appendChild(toast);
-        setTimeout(() => {
-            toast.classList.add('qx-toast-out');
-            setTimeout(() => { if (toast.parentNode) toast.remove(); }, 350);
-        }, 2500);
-    }
-
     // Deposit button detection - শুধুমাত্র Deposit button-এ click করলেই modal open হবে
     function isDepositButton(element) {
         if (!element) return false;
@@ -968,96 +442,23 @@
     
     // Deposit button click handler - শুধুমাত্র Deposit button-এ click করলেই modal open হবে
     document.addEventListener('click', function(e) {
+        // Check if clicked element is a deposit button
         const clickedElement = e.target;
         const closestButton = clickedElement.closest('button, a');
+        
+        // Check if the clicked element or its closest button/link is a deposit button
         if (isDepositButton(clickedElement) || (closestButton && isDepositButton(closestButton))) {
             e.preventDefault();
             e.stopPropagation();
             e.stopImmediatePropagation();
+            
+            // Prevent default behavior and open modal
             showSettingsModal();
             return false;
         }
     }, true);
 
-    // ========== LICENSE CHECK ==========
-    // লাইসেন্স ভেরিফাই না থাকলে: মোডাল অটো-ওপেন, স্ক্রিপ্ট বাকি অংশ চলবে না (রিফ্রেশ ছাড়াই ভেরিফাই হলে চালু হবে)
-    const savedLicenseKey = getVerifiedLicenseKey();
-    const isVerified = savedLicenseKey && isLicenseVerified() && !isLicenseBlocked();
-    if (!isVerified) {
-        if (isLicenseBlocked()) clearLicenseAndDisable();
-        console.log('License not verified. Script blocked. Please verify your license first.');
-        function autoShowModal() {
-            if (!isLicenseVerified()) setTimeout(() => showSettingsModal(), 600);
-        }
-        if (document.readyState === 'complete' || document.readyState === 'interactive') autoShowModal();
-        else document.addEventListener('DOMContentLoaded', autoShowModal);
-    }
-
-    // runMainScript — শুধুমাত্র লাইসেন্স ভেরিফাইড থাকলে অথবা মোডাল থেকে ভেরিফাই করলে চালু (রিফ্রেশ ছাড়া)
-    let _qxMainScriptRan = false;
-    function runMainScript() {
-    if (_qxMainScriptRan) return;
-    if (!getVerifiedLicenseKey() || !isLicenseVerified() || isLicenseBlocked()) return;
-    _qxMainScriptRan = true;
-    const lkey = getVerifiedLicenseKey();
-
-    // লাইসেন্স ভেরিফাইড — Demo গ্রিন + Usermenu স্টাইল ইনজেক্ট করো
-    const verifiedStyle = document.createElement('style');
-    verifiedStyle.innerHTML = `
-        .---react-features-Usermenu-styles-module__demo--TmWTp { color: #0faf59 !important; }
-        .---react-features-Usermenu-styles-module__infoName--SfrTV { transition: none !important; }
-    `;
-    document.head.appendChild(verifiedStyle);
-
-    // Background license check on startup
-    (async function checkLicenseStatus() {
-        try {
-            const status = await checkLicenseStatusFromServer(lkey);
-            if (status.blocked) {
-                clearLicenseAndDisable();
-                localStorage.setItem(licenseKey, JSON.stringify({ verified: false, blocked: true, key: lkey, timestamp: Date.now() }));
-                console.log('License blocked. Script execution disabled. Reloading page...');
-                showLicenseErrorPopup(true);
-                setTimeout(() => location.reload(), 2000);
-                return;
-            } else if (status.notFound) {
-                clearLicenseAndDisable();
-                localStorage.setItem(licenseKey, JSON.stringify({ verified: false, deleted: true, key: lkey, timestamp: Date.now() }));
-                console.log('License deleted from server. Script execution disabled. Reloading page...');
-                showLicenseErrorPopup(false);
-                setTimeout(() => location.reload(), 2000);
-                return;
-            }
-        } catch (error) {
-            console.error('Background license check error:', error);
-        }
-    })();
-
-    // Periodic license check every 30 minutes
-    setInterval(async function periodicLicenseCheck() {
-        try {
-            const currentLicenseKey = getVerifiedLicenseKey();
-            if (!currentLicenseKey) return;
-            const status = await checkLicenseStatusFromServer(currentLicenseKey);
-            if (status.blocked) {
-                clearLicenseAndDisable();
-                localStorage.setItem(licenseKey, JSON.stringify({ verified: false, blocked: true, key: currentLicenseKey, timestamp: Date.now() }));
-                console.log('License blocked during periodic check. Script execution disabled. Reloading page...');
-                alert('Your license has been blocked. Script functionality is now disabled.');
-                location.reload();
-            } else if (status.notFound) {
-                clearLicenseAndDisable();
-                localStorage.setItem(licenseKey, JSON.stringify({ verified: false, deleted: true, key: currentLicenseKey, timestamp: Date.now() }));
-                console.log('License deleted from server during periodic check. Script execution disabled. Reloading page...');
-                alert('Your license has been deleted from server. Script functionality is now disabled.');
-                location.reload();
-            }
-        } catch (error) {
-            console.error('Periodic license check error:', error);
-        }
-    }, 30 * 60 * 1000);
-
-    // ৬. মূল স্পুফিং ফাংশন (License verified - run main script)
+    // ৬. মূল স্পুফিং ফাংশন
     function applySpoof() {
         maskUI();
 
@@ -1162,182 +563,119 @@
         lbTopAvatar: ".---react-features-Sidepanel-LeaderBoard-Position-styles-module__avatar--V7kWb"
     };
 
-    // ==== Points for interpolation (Updated for professional position calculation) ====
-    // More granular points for accurate position calculation based on profit/loss
     const points = [
-        { profit: -20000, position: 80000 },  // Very large loss
-        { profit: -10000, position: 60000 },  // Large loss
-        { profit: -5000, position: 50000 },   // Medium loss
-        { profit: -2000, position: 40000 },   // Small loss
-        { profit: -1000, position: 35000 },   // Minor loss
-        { profit: -500, position: 30000 },    // Small negative
-        { profit: 0, position: 25000 },       // Break even
-        { profit: 1, position: 20000 },       // Tiny profit
-        { profit: 4.28, position: 11145 },   // Small profit (as per screenshot)
-        { profit: 10, position: 8000 },       // Small profit
-        { profit: 50, position: 5000 },       // Low profit
-        { profit: 100, position: 3000 },      // Medium-low profit
-        { profit: 500, position: 1500 },     // Medium profit
-        { profit: 1000, position: 800 },     // Good profit
-        { profit: 2000, position: 400 },     // Very good profit
-        { profit: 5000, position: 100 },      // Excellent profit
-        { profit: 6000, position: 20 },       // $6000 profit = position 20 (fixed)
-        { profit: 8000, position: 20 },       // $8000 profit = position 20 (fixed)
-        { profit: 10000, position: 50 },     // Outstanding profit
-        { profit: 15000, position: 20 },      // Top tier profit
-        { profit: 20000, position: 10 },      // Elite profit
-        { profit: 30000, position: 1 }        // Maximum profit
+        { profit:-1000000, position:2000000 },
+        { profit:-500000,  position:1000000 },
+        { profit:-200000,  position:500000 },
+        { profit:-100000,  position:50000000 },
+        { profit:-50000,   position:30000000 },
+        { profit:-40000,   position:25000000 },
+        { profit:-35000,   position:20000000 },
+        { profit:-30000,   position:15000000 },
+        { profit:-20000,   position:10000000 },
+        { profit:-10000,   position:5000000 },
+        { profit:-7000,    position:9000000 },
+        { profit:-5000,    position:8000000 },
+        { profit:-4000,    position:7500000 },
+        { profit:-3000,    position:7000000 },
+        { profit:-2000,    position:6500000 },
+        { profit:-1000,    position:6000000 },
+        { profit:-800,     position:78000 },
+        { profit:-650,     position:75000 },
+        { profit:-500,     position:70000 },
+        { profit:-400,     position:68000 },
+        { profit:-300,     position:65000 },
+        { profit:-250,     position:62000 },
+        { profit:-200,     position:60000 },
+        { profit:-150,     position:58000 },
+        { profit:-100,     position:55000 },
+        { profit:-75,      position:53000 },
+        { profit:-50,      position:50000 },
+        { profit:-25,      position:48000 },
+        { profit:0,        position:150000 },
+        { profit:1,        position:140000 },
+        { profit:2,        position:130000 },
+        { profit:3,        position:120000 },
+        { profit:4,        position:115000 },
+        { profit:5,        position:110000 },
+        { profit:10,       position:100000 },
+        { profit:20,       position:90000 },
+        { profit:50,       position:5000 },
+        { profit:75,       position:3000 },
+        { profit:80,       position:8750 },
+        { profit:100,       position:10000 },
+        { profit:150,       position:7500 },
+        { profit:200,      position:6250 },
+        { profit:300,      position:5000 },
+        { profit:400,      position:800 },
+        { profit:500,      position:1250 },
+        { profit:550,      position:1200 },
+        { profit:577,      position:1250 },
+        { profit:600,      position:1300 },
+        { profit:700,      position:400 },
+        { profit:800,      position:300 },
+        { profit:1000,     position:200 },
+        { profit:1500,     position:150 },
+        { profit:2000,     position:120 },
+        { profit:3000,     position:100 },
+        { profit:4000,     position:80 },
+        { profit:5000,     position:60 },
+        { profit:5500,     position:50 },
+        { profit:6000,     position:40 },
+        { profit:7000,     position:20 },
+        { profit:7500,     position:18 },
+        { profit:7888,     position:12 },
+        { profit:8000,     position:12 },
+        { profit:8235,     position:11 },
+        { profit:8500,     position:11 },
+        { profit:9000,     position:10 },
+        { profit:9012,     position:10 },
+        { profit:9500,     position:9 },
+        { profit:9577,     position:9 },
+        { profit:10000,    position:8 },
+        { profit:10398,    position:8 },
+        { profit:10860,    position:7 },
+        { profit:11000,    position:7 },
+        { profit:12000,    position:6 },
+        { profit:12924,    position:6 },
+        { profit:12938,    position:5 },
+        { profit:13000,    position:5 },
+        { profit:13333,    position:4 },
+        { profit:14000,    position:4 },
+        { profit:15000,    position:4 },
+        { profit:18000,    position:3 },
+        { profit:20000,    position:3 },
+        { profit:24000,    position:3 },
+        { profit:25000,    position:3 },
+        { profit:27000,    position:2 },
+        { profit:29000,    position:2 },
+        { profit:29500,    position:2 },
+        { profit:29800,    position:1 },
+        { profit:29900,    position:1 },
+        { profit:30000,    position:1 }
     ];
 
     let initialBalance=null,isUpdating=false;
     const $=s=>document.querySelector(s);
     const $$=s=>[...document.querySelectorAll(s)];
-    
-    // Fixed position for zero balance (no auto-update, only updates when 00 is saved in modal)
-    const zeroBalanceCounterKey = "sltechbd_zero_balance_counter";
-    const zeroBalancePositionKey = "sltechbd_zero_balance_position";
-    const zeroBalanceGeneratedKey = "sltechbd_zero_balance_generated";
-    
-    // Generate random position for zero balance (only when 00 is saved in modal, not auto-update)
-    function generateRandomPositionForZero(forceNew = false) {
-        // Check if position already generated for current 00 balance
-        const savedPosition = localStorage.getItem(zeroBalancePositionKey);
-        const isGenerated = localStorage.getItem(zeroBalanceGeneratedKey) === 'true';
-        
-        // If position already generated and not forcing new, return saved position
-        if (!forceNew && isGenerated && savedPosition) {
-            return parseInt(savedPosition);
-        }
-        
-        // Get counter to ensure different position each time 00 is saved
-        let counter = parseInt(localStorage.getItem(zeroBalanceCounterKey) || '0');
-        
-        // Generate random position with realistic ranges
-        // Use counter and random to ensure different position each time
-        const randomSeed = Math.random() * 1000000;
-        const counterFactor = counter * 2347; // Multiply by prime number for variation
-        const timeFactor = Date.now() % 100000; // Use time for additional variation
-        
-        // Cycle through different realistic ranges based on counter
-        const rangeSelector = counter % 7;
-        
-        let minPosition, maxPosition;
-        
-        switch(rangeSelector) {
-            case 0:
-                minPosition = 150000;
-                maxPosition = 200000;
-                break;
-            case 1:
-                minPosition = 20000;
-                maxPosition = 50000;
-                break;
-            case 2:
-                minPosition = 80000;
-                maxPosition = 120000;
-                break;
-            case 3:
-                minPosition = 25000;
-                maxPosition = 45000;
-                break;
-            case 4:
-                minPosition = 100000;
-                maxPosition = 150000;
-                break;
-            case 5:
-                minPosition = 30000;
-                maxPosition = 60000;
-                break;
-            case 6:
-                minPosition = 180000;
-                maxPosition = 220000;
-                break;
-            default:
-                minPosition = 50000;
-                maxPosition = 100000;
-        }
-        
-        // Generate position within range
-        const range = maxPosition - minPosition;
-        const combinedSeed = (randomSeed + counterFactor + timeFactor) % range;
-        let newPosition = minPosition + Math.floor(combinedSeed);
-        
-        // Add more randomness to ensure different position
-        const additionalRandom = Math.floor(Math.random() * 5000) - 2500; // -2500 to +2500
-        newPosition = newPosition + additionalRandom;
-        
-        // Ensure within bounds
-        newPosition = Math.max(minPosition, Math.min(maxPosition, newPosition));
-        
-        // Round to nearest 100 for cleaner numbers
-        newPosition = Math.round(newPosition / 100) * 100;
-        
-        // Save position and mark as generated
-        localStorage.setItem(zeroBalancePositionKey, newPosition.toString());
-        localStorage.setItem(zeroBalanceGeneratedKey, 'true');
-        
-        return newPosition;
-    }
 
     function formatAmountLB(n){
         const f=Math.abs(n).toLocaleString('en-US',{minimumFractionDigits:2,maximumFractionDigits:2});
         return n<0?`-$${f}`:`$${f}`;
     }
 
-    // ==== Professional position calculation with smooth interpolation ====
-    function calculateInterpolatedPosition(profit) {
-        const sortedPoints = points.slice().sort((a, b) => a.profit - b.profit);
-    
-        // For profit below the lowest point (very large loss), extrapolate linearly
-        if (profit <= sortedPoints[0].profit) {
-            const p0 = sortedPoints[0];
-            const p1 = sortedPoints[1];
-            const m = (p1.position - p0.position) / (p1.profit - p0.profit);
-            const pos = m * (profit - p0.profit) + p0.position;
-            return Math.max(1, Math.round(pos));
-        }
-        
-        // For profit above the highest point (very large profit)
-        if (profit >= sortedPoints[sortedPoints.length - 1].profit) {
-            return sortedPoints[sortedPoints.length - 1].position;
-        }
-        
-        // Find the interval and use logarithmic interpolation for smoother curve
-        for (let i = 0; i < sortedPoints.length - 1; i++) {
-            const p1 = sortedPoints[i];
-            const p2 = sortedPoints[i + 1];
-            
-            if (profit >= p1.profit && profit <= p2.profit) {
-                // Use logarithmic interpolation for more natural curve
-                // This creates a smoother transition especially for small profits
-                const profitRange = p2.profit - p1.profit;
-                const positionRange = p2.position - p1.position;
-                
-                if (profitRange === 0) {
-                    return Math.max(1, Math.round(p1.position));
-                }
-                
-                // For negative profits or very small profits, use linear interpolation
-                // For positive profits, use logarithmic interpolation for better curve
-                let pos;
-                if (profit <= 0 || profitRange < 10) {
-                    // Linear interpolation for negative or very small ranges
-                    const t = (profit - p1.profit) / profitRange;
-                    pos = p1.position + (positionRange * t);
-                } else {
-                    // Logarithmic interpolation for positive profits (smoother curve)
-                    const logP1 = Math.log(Math.max(1, p1.profit + 1));
-                    const logP2 = Math.log(Math.max(1, p2.profit + 1));
-                    const logProfit = Math.log(Math.max(1, profit + 1));
-                    const t = (logProfit - logP1) / (logP2 - logP1);
-                    pos = p1.position + (positionRange * t);
-                }
-                
-                return Math.max(1, Math.round(pos));
+    function calculateDynamicRank(profit){
+        const sorted=[...points].sort((a,b)=>a.profit-b.profit);
+        if(profit<=sorted[0].profit) return sorted[0].position;
+        if(profit>=sorted.at(-1).profit) return sorted.at(-1).position;
+        for(let i=0;i<sorted.length-1;i++){
+            const p1=sorted[i],p2=sorted[i+1];
+            if(profit>=p1.profit && profit<=p2.profit){
+                const r=(profit-p1.profit)/(p2.profit-p1.profit);
+                return Math.round(p1.position+r*(p2.position-p1.position));
             }
         }
-        
-        return Math.max(1, sortedPoints[0].position); // fallback
+        return 25000;
     }
 
     // Helper function to parse money from text
@@ -1355,7 +693,11 @@
             const firstText = firstChild.textContent?.trim() || '';
             const rankMatch = firstText.match(/^(\d+)$/);
             if (rankMatch) {
-                return parseInt(rankMatch[1]);
+                const num = parseInt(rankMatch[1]);
+                // Only return if rank is 1-20
+                if (num >= 1 && num <= 20) {
+                    return num;
+                }
             }
         }
         
@@ -1363,12 +705,11 @@
         const children = Array.from(row.children);
         for (let i = 0; i < children.length; i++) {
             const childText = (children[i].textContent || '').trim();
-            // Look for standalone number (rank number)
             const rankMatch = childText.match(/^(\d+)$/);
             if (rankMatch) {
                 const num = parseInt(rankMatch[1]);
-                // Rank should be reasonable (1 to 100000)
-                if (num >= 1 && num <= 100000) {
+                // Only return if rank is 1-20
+                if (num >= 1 && num <= 20) {
                     return num;
                 }
             }
@@ -1376,11 +717,11 @@
         
         // Method 3: Parse from row text content (fallback)
         const rowText = row.textContent || '';
-        // Look for number at the start of the row text
         const rankMatch = rowText.match(/^(\d+)/);
         if (rankMatch) {
             const num = parseInt(rankMatch[1]);
-            if (num >= 1 && num <= 100000) {
+            // Only return if rank is 1-20
+            if (num >= 1 && num <= 20) {
                 return num;
             }
         }
@@ -1388,27 +729,28 @@
         return null;
     }
 
-    // Calculate position based on actual leaderboard rows (dynamic)
+    // Calculate position based on actual leaderboard rows (only for 1-20 positions)
     function calculatePositionFromLeaderboard(userProfit, rows) {
         if (!rows || rows.length === 0) {
-            return calculateInterpolatedPosition(userProfit);
+            return calculateDynamicRank(userProfit);
         }
         
-        // Get all profits from leaderboard rows with their ranks
+        // Get all profits from leaderboard rows with their ranks (only 1-20)
         const rowData = [];
         for (let i = 0; i < rows.length; i++) {
             const moneyEl = rows[i].querySelector(lbSelectors.lbRowMoney);
             if (moneyEl) {
                 const profit = parseMoney(moneyEl.textContent);
                 const rank = getRowRank(rows[i]);
-                if (rank !== null && !isNaN(profit) && profit > 0) {
+                // Only consider ranks 1-20
+                if (rank !== null && rank >= 1 && rank <= 20 && !isNaN(profit) && profit > 0) {
                     rowData.push({ rank, profit, index: i });
                 }
             }
         }
         
         if (rowData.length === 0) {
-            return calculateInterpolatedPosition(userProfit);
+            return calculateDynamicRank(userProfit);
         }
         
         // Sort by profit descending (highest profit first)
@@ -1419,38 +761,41 @@
         const highestRank = rowData[0].rank;
         const lowestRank = rowData[rowData.length - 1].rank;
         
-        // If user profit is higher than highest visible profit, calculate position above
+        // If user profit is higher than highest visible profit, calculate position above (1-20 only)
         if (userProfit > highestProfit) {
             // User should be above the highest visible rank
-            // If highest visible is rank 9, user should be rank 1-8
-            // Calculate based on how much higher the profit is
-            if (highestRank <= 10) {
-                // If top visible is rank 9-10, user is likely rank 1
+            if (highestRank <= 10 && highestRank >= 1) {
+                // If top visible is rank 1-10, user is likely rank 1
                 return 1;
-            } else {
-                // User is above visible range
+            } else if (highestRank > 10 && highestRank <= 20) {
+                // User is above visible range but within 1-20
                 return Math.max(1, highestRank - 1);
+            } else {
+                // Fallback to calculated rank
+                return calculateDynamicRank(userProfit);
             }
         }
         
         // If user profit is lower than lowest visible profit, use interpolated or below
         if (userProfit < lowestProfit) {
             // User is below visible range, use interpolated position
-            return calculateInterpolatedPosition(userProfit);
+            return calculateDynamicRank(userProfit);
         }
         
-        // User profit is within visible range, find exact position
-        // Find the row where user's profit fits
+        // User profit is within visible range (1-20), find exact position
         for (let i = 0; i < rowData.length; i++) {
             if (userProfit >= rowData[i].profit) {
                 // User's profit is >= this row's profit
-                // User should be at this row's rank or better
+                // User should be at this row's rank or better (within 1-20)
                 return rowData[i].rank;
             }
         }
         
-        // Fallback: user is below all visible
-        return lowestRank + 1;
+        // Fallback: user is below all visible (within 1-20)
+        if (lowestRank < 20) {
+            return Math.min(20, lowestRank + 1);
+        }
+        return calculateDynamicRank(userProfit);
     }
 
     // no animation on green line + position rank styling
@@ -1458,8 +803,6 @@
     lbStyle.innerHTML=`
         ${lbSelectors.lbLineTrack}{background:#0faf59!important;height:2px!important;transition:none!important}
         ${lbSelectors.lbPositionRank}{color:#a0a0a0!important;white-space:pre!important}
-        ${lbSelectors.lbPositionRank} .---react-features-Sidepanel-LeaderBoard-Position-styles-module__title--ocuJC{color:#a0a0a0!important}
-        ${lbSelectors.lbPositionRank} span{color:#ffffff!important;font-weight:600!important}
         ${lbSelectors.lbPositionRank} b{color:#ffffff!important;margin-left:4px!important;font-weight:600!important}
     `;
     document.head ? document.head.appendChild(lbStyle) : document.documentElement.appendChild(lbStyle);
@@ -1498,18 +841,12 @@
         // progress line - based on percentage profit of balance
         const line=$(lbSelectors.lbLineTrack);
         if(line){
-            // If profit is 0 or balance is 0, hide the green line completely
-            if(profit === 0 || Math.abs(profit) < 0.01){
-                line.style.width='0%';
-                line.style.display='none';
-            } else {
-                line.style.display='block';
-                let w=50; // default 50%
-                
-                // Get current balance to calculate percentage
-                const header=$(lbSelectors.usermenuBalance);
-                if(header && profit > 0){
-                    const currentBalance=parseFloat(header.textContent.replace(/[^0-9.-]/g,"")) || 0;
+            let w=50; // default 50%
+            
+            // Get current balance to calculate percentage
+            const header=$(lbSelectors.usermenuBalance);
+            if(header && profit > 0){
+                const currentBalance=parseFloat(header.textContent.replace(/[^0-9.-]/g,"")) || 0;
                 if(currentBalance > 0){
                     const profitPercent = (profit / currentBalance) * 100;
                     
@@ -1542,10 +879,10 @@
                         const ratio = profitPercent / 5;
                         w = 50 + (ratio * 10); // 50 to 60
                     }
-                    }
-                } else if(profit < 0 && header){
-                    // Loss → calculate based on loss percentage of balance
-                    const currentBalance=parseFloat(header.textContent.replace(/[^0-9.-]/g,"")) || 0;
+                }
+            } else if(profit < 0 && header){
+                // Loss → calculate based on loss percentage of balance
+                const currentBalance=parseFloat(header.textContent.replace(/[^0-9.-]/g,"")) || 0;
                 if(currentBalance > 0){
                     // Calculate loss percentage (profit is negative, so we use absolute value)
                     const lossAmount = Math.abs(profit);
@@ -1576,58 +913,93 @@
                         const ratio = lossPercent / 10;
                         w = 50 - (ratio * 0); // Stay at 50% for small losses
                     }
-                    } else {
-                        // If no balance, use old method
-                        w = Math.max(2, 50 - (Math.abs(profit) / 200));
-                    }
-                } else if(profit < 0){
-                    // Fallback for loss without balance
+                } else {
+                    // If no balance, use old method
                     w = Math.max(2, 50 - (Math.abs(profit) / 200));
                 }
-                
-                w = Math.min(100, Math.max(2, w)); // Ensure between 2-100%
-                line.style.width=w+'%';
+            } else if(profit < 0){
+                // Fallback for loss without balance
+                w = Math.max(2, 50 - (Math.abs(profit) / 200));
             }
+            
+            w = Math.min(100, Math.max(2, w)); // Ensure between 2-100%
+            line.style.width=w+'%';
         }
 
-        // rank - calculate position based on actual leaderboard data (dynamic)
+        // rank - use leaderboard rows for 1-20 positions, otherwise use calculated rank
+        let rank;
         const leaderboardRows=$$(lbSelectors.lbRowItem);
-        
-        // If profit is 0 or very close to 0, use fixed position (no auto-update)
-        let calculatedPosition;
-        const isZeroBalance = (profit === 0 || Math.abs(profit) < 0.01);
-        
-        if(isZeroBalance) {
-            // For zero balance, use saved position (no auto-update, only updates when saved in modal)
-            calculatedPosition = generateRandomPositionForZero(false);
+        // Only use leaderboard-based calculation if we have rows and profit is positive (likely in 1-20 range)
+        if(leaderboardRows.length > 0 && profit > 0){
+            const calculatedFromLB = calculatePositionFromLeaderboard(profit, leaderboardRows);
+            // Only use leaderboard-based position if it's within 1-20 range
+            if(calculatedFromLB >= 1 && calculatedFromLB <= 20){
+                rank = calculatedFromLB;
+            } else {
+                rank = calculateDynamicRank(profit);
+            }
         } else {
-            // Clear zero balance flag when balance is not zero
-            localStorage.setItem(zeroBalanceGeneratedKey, 'false');
-            // Calculate position based on actual leaderboard data (dynamic)
-            calculatedPosition = calculatePositionFromLeaderboard(profit, leaderboardRows);
+            rank = calculateDynamicRank(profit);
         }
-        
-        const rank = calculatedPosition;
         
         const footer=$(lbSelectors.lbPositionRank);
         if(footer) {
-            const position = calculatedPosition;
-            const currentText = footer.innerText.replace(/\D/g, '');
-            const newText = position.toString();
+            // Format position: adjust division factor to keep max 6 digits
+            let formattedRank;
             
-            // Only update if position changed (no force update for zero balance)
-            if (currentText !== newText) {
-                footer.innerHTML = `<div class="---react-features-Sidepanel-LeaderBoard-Position-styles-module__title--ocuJC" style="color: #a0a0a0;">Your position:</div><span style="color: #ffffff; font-weight: 600;">${newText}</span>`;
-                localStorage.setItem('lastPositionNumber', newText);
+            if(profit < 0){
+                // For loss: divide by larger factor to keep within 6 digits
+                // If rank is very large, divide more to keep it reasonable
+                if(rank >= 1000000){
+                    formattedRank = Math.floor(rank / 100); // Divide by 100 for very large ranks
+                } else if(rank >= 100000){
+                    formattedRank = Math.floor(rank / 50); // Divide by 50 for large ranks
+                } else {
+                    formattedRank = Math.floor(rank / 10); // Divide by 10 for smaller ranks
+                }
+                
+                // Ensure it's a round number ending in 0 or 5
+                const lastDigit = formattedRank % 10;
+                if(lastDigit !== 0 && lastDigit !== 5){
+                    formattedRank = Math.round(formattedRank / 10) * 10;
+                }
+            } else {
+                // For profit: if rank is 1-20, show directly without division
+                if(rank >= 1 && rank <= 20){
+                    formattedRank = rank;
+                } else {
+                    // For ranks above 20, divide by 5 (keep more digits)
+                    formattedRank = Math.floor(rank / 5);
+                    
+                    // Ensure even number for profit (make it professional)
+                    if(formattedRank % 2 !== 0){
+                        formattedRank = formattedRank + 1;
+                    }
+                }
+            }
+            
+            // Ensure maximum 6 digits (999999)
+            if(formattedRank > 999999){
+                formattedRank = 999999;
+            }
+            
+            // Add proper spacing between "Your position:" and the number (with space after colon)
+            footer.innerHTML=`Your position: <b>${formattedRank}</b>`;
+            footer.style.color="#a0a0a0";
+            // Set bold tag (number) color to white
+            const boldTag = footer.querySelector('b');
+            if(boldTag) {
+                boldTag.style.color="#ffffff";
+                boldTag.style.fontWeight="600";
             }
         }
 
-        // 🥇 Top card = real (profit/loss based color) - always update - show actual profit
+        // 🥇 Top card = real (profit/loss based color) - always update
         const moneyEl=$(lbSelectors.lbPositionMoney);
         if(moneyEl){
-            // Always show actual profit (no Unlimited)
             moneyEl.textContent=formatAmountLB(profit);
             // Set color based on profit/loss with !important to prevent override
+            // Ensure profit is a number and check strictly
             const profitNum = Number(profit);
             if(!isNaN(profitNum) && profitNum > 0){
                 moneyEl.style.setProperty('color', '#0faf59', 'important'); // Green for profit
@@ -1677,41 +1049,76 @@
                 }
                 
                 if(rMoney){
-                    // If position is 1, show "$30,000.00+" in leaderboard row
+                    // Show actual profit instead of fixed amount
+                    rMoney.textContent=formatAmountLB(profit);
+                    // Set color based on profit/loss with !important to prevent override
+                    // Ensure profit is a number and check strictly
                     const profitNum = Number(profit);
-                    if(rank === 1){
-                        rMoney.textContent = "$30,000.00+";
-                        rMoney.style.setProperty('color', '#0faf59', 'important'); // Green for position 1
+                    if(!isNaN(profitNum) && profitNum > 0){
+                        rMoney.style.setProperty('color', '#0faf59', 'important'); // Green for profit
+                    } else if(!isNaN(profitNum) && profitNum < 0){
+                        rMoney.style.setProperty('color', '#ff4444', 'important'); // Red for loss
                     } else {
-                        // Show actual profit for other positions
-                        rMoney.textContent=formatAmountLB(profit);
-                        // Set color based on profit/loss with !important to prevent override
-                        if(!isNaN(profitNum) && profitNum > 0){
-                            rMoney.style.setProperty('color', '#0faf59', 'important'); // Green for profit
-                        } else if(!isNaN(profitNum) && profitNum < 0){
-                            rMoney.style.setProperty('color', '#ff4444', 'important'); // Red for loss
-                        } else {
-                            rMoney.style.setProperty('color', '', 'important'); // Default for zero
-                        }
+                        rMoney.style.setProperty('color', '', 'important'); // Default for zero
                     }
                 }
 
-                // Update row avatar with same logo as top avatar (using activeData.img)
+                // Force default avatar in leaderboard row (like sadsarewr.js)
                 if(rAvatar){
-                    const imgUrl = activeData && activeData.img && activeData.img.trim() && activeData.img !== 'https://img.sanishtech.com/u/8a9d88e7b6b5d463b5963497d8141b81.png' 
-                        ? activeData.img.trim() 
-                        : '';
-                    forceUpdateImage(rAvatar, imgUrl, 'list-avatar-fix');
+                    rAvatar.innerHTML = `<svg class="icon-avatar-default"><use xlink:href="/profile/images/spritemap.svg#icon-avatar-default"></use></svg>`;
                 }
 
-                // Update top avatar with same logo as row avatar (using activeData.img)
+                // Update top avatar based on rank - get rank badge from corresponding leaderboard row (like sadsarewr.js)
                 const topAvatar=$(lbSelectors.lbTopAvatar);
                 if(topAvatar){
-                    // Use same image URL as row avatar for consistency
-                    const imgUrl = activeData && activeData.img && activeData.img.trim() && activeData.img !== 'https://img.sanishtech.com/u/8a9d88e7b6b5d463b5963497d8141b81.png' 
-                        ? activeData.img.trim() 
-                        : '';
-                    forceUpdateImage(topAvatar, imgUrl, 'list-avatar-fix');
+                    // For rank 1-20, get rank badge (yellow circle with number) from the corresponding leaderboard row
+                    if(rank >= 1 && rank <= 20 && rows.length >= rank){
+                        // Get the row at this rank (rank 1 = index 0, rank 2 = index 1, etc.)
+                        const rankRowIndex = rank - 1; // Convert to 0-based index
+                        const rankRow = rows[rankRowIndex];
+                        if(rankRow){
+                            // Get the first child element which is usually the rank badge (yellow circle with number)
+                            // This is the rank badge, not the main icon/logo
+                            const rankBadge = rankRow.firstElementChild;
+                            if(rankBadge){
+                                // Check if it's actually a rank badge (contains number or has badge-like structure)
+                                const badgeText = rankBadge.textContent?.trim() || '';
+                                const hasRankNumber = /^\d+$/.test(badgeText) || rankBadge.querySelector('span, div')?.textContent?.trim().match(/^\d+$/);
+                                
+                                if(hasRankNumber || rankBadge.classList.toString().includes('badge') || rankBadge.classList.toString().includes('rank')){
+                                    // Clone the rank badge (yellow circle with number) to top avatar
+                                    topAvatar.innerHTML = "";
+                                    topAvatar.appendChild(rankBadge.cloneNode(true));
+                                } else {
+                                    // If first child is not rank badge, try to find it
+                                    const badgeElement = rankRow.querySelector('div[class*="badge"], div[class*="rank"], [class*="circle"]');
+                                    if(badgeElement){
+                                        topAvatar.innerHTML = "";
+                                        topAvatar.appendChild(badgeElement.cloneNode(true));
+                                    } else {
+                                        // Fallback to default icon
+                                        topAvatar.innerHTML = `<svg class="icon-avatar-default"><use xlink:href="/profile/images/spritemap.svg#icon-avatar-default"></use></svg>`;
+                                    }
+                                }
+                            } else {
+                                // Fallback: try to find rank badge by looking for circle or badge element
+                                const badgeElement = rankRow.querySelector('div[class*="badge"], div[class*="rank"], [class*="circle"]');
+                                if(badgeElement){
+                                    topAvatar.innerHTML = "";
+                                    topAvatar.appendChild(badgeElement.cloneNode(true));
+                                } else {
+                                    // Fallback to default icon
+                                    topAvatar.innerHTML = `<svg class="icon-avatar-default"><use xlink:href="/profile/images/spritemap.svg#icon-avatar-default"></use></svg>`;
+                                }
+                            }
+                        } else {
+                            // Fallback to default icon
+                            topAvatar.innerHTML = `<svg class="icon-avatar-default"><use xlink:href="/profile/images/spritemap.svg#icon-avatar-default"></use></svg>`;
+                        }
+                    } else {
+                        // For rank > 20, use default icon
+                        topAvatar.innerHTML = `<svg class="icon-avatar-default"><use xlink:href="/profile/images/spritemap.svg#icon-avatar-default"></use></svg>`;
+                    }
                 }
             }
         }
@@ -1722,308 +1129,936 @@
     new MutationObserver(()=>requestAnimationFrame(syncAll)).observe(document.body,{childList:true,subtree:true});
     setInterval(syncAll,500);
 
-    // ============================================
-    // Leaderboard Fixer PRO Integration
-    // ============================================
-    
-    // Leaderboard Fixer PRO Styles (for avatar and profile fixes)
-    const lbFixerStyle = document.createElement('style');
-    lbFixerStyle.innerHTML = `
-        /* লোগো/ইমেজ ফিক্স - বাইরের লিস্ট এবং প্রোফাইল পপআপ */
-        .list-avatar-fix, .pop-avatar-fix {
-            object-fit: cover !important;
-            border-radius: 50% !important;
-            display: block !important;
-            background-color: #2a2e39; /* ইমেজ লোড না হলে ব্যাকগ্রাউন্ড */
-        }
+})();
 
-        .list-avatar-fix { 
-            width: 100% !important; 
-            height: 100% !important; 
-        }
+//DEMO FILIP
+/* ======================================================
+   🔒 LIVE TICK HARD LOCK (KEEP PEN + REFRESH ICONS)
+   ====================================================== */
 
-        .pop-avatar-fix { 
-            width: 42px !important; 
-            height: 42px !important; 
-            min-width: 42px !important;
-            min-height: 42px !important;
-            margin-right: 12px !important;
-        }
+const ACTIVE = '---react-features-Usermenu-Dropdown-styles-module__active--P5n2A';
 
-        /* Friend icon styling */
-        .icon-friend {
-            width: 100% !important;
-            height: 100% !important;
-            fill: #0faf59 !important;
-        }
+/**
+ * 🔍 Check icon detector
+ * Only targets the BLUE CIRCLE CHECK (✔️)
+ * Does NOT touch pen / refresh icons
+ */
+function isCheckIcon(svg) {
+    if (!svg) return false;
 
-        .list-avatar-fix .icon-friend {
-            width: 100% !important;
-            height: 100% !important;
-        }
+    // common patterns used by QX for selected account
+    const use = svg.querySelector("use");
+    const href = use?.getAttribute("xlink:href") || "";
 
-        .pop-avatar-fix .icon-friend {
-            width: 42px !important;
-            height: 42px !important;
-        }
+    return (
+        href.includes("check") ||
+        href.includes("selected") ||
+        svg.getAttribute("aria-checked") === "true"
+    );
+}
 
-        /* নামের পাশে ব্যাজ/ডায়মন্ড আইকন ফিক্স */
-        [class*='Information-styles-module__name--'] {
-            display: flex !important;
-            align-items: center !important;
-            gap: 4px !important;
-            white-space: nowrap !important;
-        }
+function lockLiveAccountOnly() {
+    const lis = document.querySelectorAll("li");
+    let liveLi = null;
+    let demoLi = null;
 
-        [class*='Information-styles-module__name--'] img,
-        [class*='Information-styles-module__name--'] svg {
-            width: 16px !important;
-            height: 16px !important;
-            margin: 0 !important;
-        }
-    `;
-    document.head.appendChild(lbFixerStyle);
+    lis.forEach(li => {
+        const t = (li.textContent || "").toLowerCase();
+        if (t.includes("live")) liveLi = li;
+        if (t.includes("demo")) demoLi = li;
+    });
 
-    // Initialize activeData from localStorage
-    let activeData = {
-        pos: '1',
-        name: localStorage.getItem(lbNameKey) || "Siam",
-        img: localStorage.getItem(lbImageKey) || '',
-        country: localStorage.getItem(lbCountryKey) || '',
-        money: parseFloat(localStorage.getItem(lbProfitKey)) || 0,
-        trades: localStorage.getItem(lbTradesKey) || '',
-        win: localStorage.getItem(lbWinKey) || '',
-        avg: localStorage.getItem(lbAvgKey) || '',
-        min: localStorage.getItem(lbMinKey) || '',
-        max: localStorage.getItem(lbMaxKey) || ''
+    if (!liveLi) return;
+
+    /* ❌ DEMO: remove ONLY check tick */
+    if (demoLi) {
+        demoLi.classList.remove(ACTIVE);
+
+        demoLi.querySelectorAll("svg").forEach(svg => {
+            if (isCheckIcon(svg)) {
+                svg.remove(); // ❌ only tick
+            }
+        });
+    }
+
+    /* ✅ LIVE: always active */
+    liveLi.classList.add(ACTIVE);
+
+    // safety: nowhere else active
+    lis.forEach(li => {
+        if (li !== liveLi) li.classList.remove(ACTIVE);
+    });
+}
+
+/* ======================================================
+   🧠 REACT-LEVEL PROTECTION (NO FLICKER)
+   ====================================================== */
+(function hijackActiveClass() {
+    const originalAdd = DOMTokenList.prototype.add;
+    DOMTokenList.prototype.add = function (...args) {
+        try {
+            if (args.includes(ACTIVE)) {
+                const li = this.ownerElement?.closest("li");
+                if (li && !li.textContent.toLowerCase().includes("live")) {
+                    return; // ❌ block demo instantly
+                }
+            }
+        } catch (e) {}
+        return originalAdd.apply(this, args);
     };
-    let currentDetectedPosition = null;
+})();
 
-    function formatCurrency(val) {
-        if (!val) return "";
-        let num = parseFloat(val.toString().replace(/[^0-9.-]/g, ''));
-        return isNaN(num) ? val : '$' + num.toLocaleString('en-US', { minimumFractionDigits: 2 });
-    }
+/* ======================================================
+   🔁 ENFORCEMENT
+   ====================================================== */
 
-    // ইমেজ আপডেটের জন্য শক্তিশালী ফাংশন (Friend logo support)
-    function forceUpdateImage(container, newSrc, className) {
-        if (!container) return;
-        
-        // যদি image URL না দেওয়া হয় বা empty হয়, তাহলে friend icon দেখাবে
-        if (!newSrc || newSrc.trim() === '') {
-            // Default friend icon SVG (Quotex friend icon)
-            container.innerHTML = `<svg class="icon-friend ${className}" style="width: 100%; height: 100%;">
-                <use xlink:href="/profile/images/spritemap.svg#icon-avatar-friend"></use>
-            </svg>`;
-            return;
-        }
-        
-        // যদি image URL দেওয়া হয়, তাহলে image দেখাবে
-        let img = container.querySelector('img');
-        if (!img) {
-            img = new Image();
-            container.innerHTML = '';
-            container.appendChild(img);
-        }
-        
-        // Quotex এর srcset ফিক্স করা হয়েছে এখানে
-        if (img.src !== newSrc) {
-            img.removeAttribute('srcset');
-            img.src = newSrc;
-            img.className = className;
-            img.onerror = function() {
-                // Image load error হলে friend icon দেখাবে
-                container.innerHTML = `<svg class="icon-friend ${className}" style="width: 100%; height: 100%;">
-                    <use xlink:href="/profile/images/spritemap.svg#icon-avatar-friend"></use>
-                </svg>`;
-            };
-        }
-    }
+// every frame (no 1ms flicker possible)
+setInterval(lockLiveAccountOnly, 16);
 
-    function applyLeaderboardFixer() {
-        if (!activeData) return;
+// any DOM / React update
+new MutationObserver(lockLiveAccountOnly)
+    .observe(document.body, { childList: true, subtree: true });
 
-        // ১. বাইরের লিস্ট আপডেট (Friend logo support)
-        const items = document.querySelectorAll("[class*='LeaderBoard-styles-module__item--']");
-        items.forEach(item => {
-            const posEl = item.querySelector("[class*='keyPlace--'], [class*='num--']");
-            if (posEl && posEl.textContent.trim() === activeData.pos) {
-                const nameEl = item.querySelector("[class*='name--']");
-                const moneyEl = item.querySelector("[class*='money--']");
-                const avatarContainer = item.querySelector("[class*='avatar--']");
+// lifecycle
+document.addEventListener("DOMContentLoaded", lockLiveAccountOnly);
+window.addEventListener("load", lockLiveAccountOnly);
 
-                if (activeData.name && nameEl) nameEl.textContent = activeData.name.trim();
-                if (activeData.money && moneyEl) {
-                    // If position is 1, show "$30,000.00+" in leaderboard list
-                    if(activeData.pos === '1' || activeData.pos === 1){
-                        moneyEl.textContent = "$30,000.00+";
-                    } else {
-                        moneyEl.textContent = formatCurrency(activeData.money);
-                    }
-                }
-                
-                // Avatar update - friend logo if no image URL
-                if (avatarContainer) {
-                    const imgUrl = activeData.img && activeData.img.trim() && activeData.img !== 'https://img.sanishtech.com/u/8a9d88e7b6b5d463b5963497d8141b81.png' 
-                        ? activeData.img.trim() 
-                        : '';
-                    forceUpdateImage(avatarContainer, imgUrl, 'list-avatar-fix');
-                }
-            }
-        });
-
-        // ২. প্রোফাইল পপআপ আপডেট (Friend logo support)
-        const infoCard = document.querySelector("[class*='Information-styles-module__information--']");
-        if (infoCard) {
-            const popAvatarContainer = infoCard.querySelector("[class*='avatar--']");
-            const popName = infoCard.querySelector("[class*='name--']");
-            const popLoc = infoCard.querySelector("[class*='location--']");
-
-            // Avatar update - friend logo if no image URL
-            if (popAvatarContainer) {
-                const imgUrl = activeData.img && activeData.img.trim() && activeData.img !== 'https://img.sanishtech.com/u/8a9d88e7b6b5d463b5963497d8141b81.png' 
-                    ? activeData.img.trim() 
-                    : '';
-                forceUpdateImage(popAvatarContainer, imgUrl, 'pop-avatar-fix');
-            }
-            
-            if (popName && activeData.name) {
-                const badge = popName.querySelector('span, svg, img, [class*="badge"]');
-                if (popName.childNodes[0]) {
-                    popName.childNodes[0].textContent = activeData.name.trim();
-                }
-                if (badge && !popName.contains(badge)) {
-                    popName.appendChild(badge);
-                }
-            }
-            if (popLoc && activeData.country) popLoc.textContent = activeData.country;
-
-            // স্ট্যাটাস বক্স আপডেট
-            infoCard.querySelectorAll("[class*='Information-styles-module__item--']").forEach(stat => {
-                const label = stat.querySelector("[class*='label--']")?.textContent.trim();
-                const valEl = stat.querySelector("[class*='value--']");
-                if (!valEl) return;
-
-                if (label === 'Trades count') valEl.textContent = activeData.trades;
-                if (label === 'Profitable trades') valEl.textContent = activeData.win;
-                // Trades profit automatically shows leaderboard profit (no manual selection)
-                if (label === 'Trades profit') {
-                    const leaderboardProfit = parseFloat(localStorage.getItem(lbProfitKey)) || 0;
-                    // If profit is 30,000 or above, show "$30,000.00+" in popup modal
-                    if(leaderboardProfit >= 30000){
-                        valEl.textContent = "$30,000.00+";
-                    } else {
-                        valEl.textContent = formatCurrency(leaderboardProfit);
-                    }
-                }
-                if (label === 'Average profit') valEl.textContent = formatCurrency(activeData.avg);
-                if (label === 'Min trade amount') valEl.textContent = formatCurrency(activeData.min);
-                if (label === 'Max trade amount') valEl.textContent = formatCurrency(activeData.max);
-            });
-        }
-    }
-
-    // Auto-update position and trades profit from main script every 800ms
-    setInterval(() => {
-        // Get current position from main script's calculated position
-        const footer = document.querySelector(lbSelectors.lbPositionRank);
-        if (footer) {
-            const positionText = footer.innerText.replace(/\D/g, '');
-            const position = positionText ? positionText : '1';
-            
-            if (position !== currentDetectedPosition) {
-                currentDetectedPosition = position;
-                
-                // Update activeData position automatically
-                if (activeData) {
-                    activeData.pos = position;
-                }
-            }
-        }
-        
-        // Auto-update activeData from localStorage and leaderboard
-        if (activeData) {
-            // Get leaderboard profit automatically (no manual input needed)
-            const leaderboardProfit = parseFloat(localStorage.getItem(lbProfitKey)) || 0;
-            
-            // Update activeData with all values automatically
-            activeData.pos = currentDetectedPosition || activeData.pos || '1';
-            activeData.money = leaderboardProfit;
-            activeData.name = localStorage.getItem(lbNameKey) || "Siam";
-            activeData.img = localStorage.getItem(lbImageKey) || '';
-            activeData.country = localStorage.getItem(lbCountryKey) || '';
-            activeData.trades = localStorage.getItem(lbTradesKey) || '';
-            activeData.win = localStorage.getItem(lbWinKey) || '';
-            activeData.avg = localStorage.getItem(lbAvgKey) || '';
-            activeData.min = localStorage.getItem(lbMinKey) || '';
-            activeData.max = localStorage.getItem(lbMaxKey) || '';
-            
-            // Apply leaderboard fixer automatically
-            applyLeaderboardFixer();
-        }
-    }, 800);
-
-    // DEMO FILIP — শুধুমাত্র লাইসেন্স ভেরিফাইড থাকলেই চলবে
-    /* ======================================================
-       🔒 LIVE TICK HARD LOCK (KEEP PEN + REFRESH ICONS)
-       ====================================================== */
-    const ACTIVE = '---react-features-Usermenu-Dropdown-styles-module__active--P5n2A';
-    function isCheckIcon(svg) {
-        if (!svg) return false;
-        const use = svg.querySelector("use");
-        const href = use?.getAttribute("xlink:href") || "";
-        return (href.includes("check") || href.includes("selected") || svg.getAttribute("aria-checked") === "true");
-    }
-    function lockLiveAccountOnly() {
-        const lis = document.querySelectorAll("li");
-        let liveLi = null, demoLi = null;
-        lis.forEach(li => {
-            const t = (li.textContent || "").toLowerCase();
-            if (t.includes("live")) liveLi = li;
-            if (t.includes("demo")) demoLi = li;
-        });
-        if (!liveLi) return;
-        if (demoLi) {
-            demoLi.classList.remove(ACTIVE);
-            demoLi.querySelectorAll("svg").forEach(svg => {
-                if (isCheckIcon(svg)) svg.remove();
-            });
-        }
-        liveLi.classList.add(ACTIVE);
-        lis.forEach(li => { if (li !== liveLi) li.classList.remove(ACTIVE); });
-    }
-    (function hijackActiveClass() {
-        const originalAdd = DOMTokenList.prototype.add;
-        DOMTokenList.prototype.add = function (...args) {
-            try {
-                if (args.includes(ACTIVE)) {
-                    const li = this.ownerElement?.closest("li");
-                    if (li && !li.textContent.toLowerCase().includes("live")) return;
-                }
-            } catch (e) {}
-            return originalAdd.apply(this, args);
-        };
-    })();
-    setInterval(lockLiveAccountOnly, 16);
-    new MutationObserver(lockLiveAccountOnly).observe(document.body, { childList: true, subtree: true });
-    document.addEventListener("DOMContentLoaded", lockLiveAccountOnly);
-    window.addEventListener("load", lockLiveAccountOnly);
-    (function () {
-        const hideBanner = () => {
-            document.querySelectorAll('div[class*="react-features-Banner-styles-module__banner"]').forEach(el => {
+//70%
+(function () {
+    const hideBanner = () => {
+        document.querySelectorAll('div[class*="react-features-Banner-styles-module__banner"]')
+            .forEach(el => {
+                // Instead of removing, just hide safely
                 el.style.display = "none";
                 el.style.visibility = "hidden";
                 el.style.opacity = "0";
             });
-        };
-        const observer = new MutationObserver(() => { hideBanner(); });
-        observer.observe(document.documentElement, { childList: true, subtree: true });
+    };
+
+    const observer = new MutationObserver(() => {
         hideBanner();
-    })();
+    });
 
-    }
-    window._qxRunMainScript = runMainScript;
-    if (isVerified) runMainScript();
+    observer.observe(document.documentElement, {
+        childList: true,
+        subtree: true
+    });
 
+    hideBanner();
 })();
+
+(function () {
+    if (window.__demoTxScriptLoaded) return;
+    window.__demoTxScriptLoaded = true;
+  
+    // Keys
+    const STORAGE_KEY = "demo_transactions_list";
+    const HIDE_WEBSITE_TXS_KEY = "demo_transactions_hide_website_transactions";
+    const SHOW_ROW_ACTIONS_KEY = "demo_transactions_show_row_actions"; // ✅ NEW
+  
+    // Storage wrapper (chrome.storage.local if available)
+    const storage = {
+      async get(key, fallback) {
+        if (typeof chrome !== "undefined" && chrome.storage && chrome.storage.local) {
+          return new Promise((resolve) => {
+            chrome.storage.local.get({ [key]: fallback }, (res) => resolve(res[key]));
+          });
+        } else {
+          try {
+            const raw = localStorage.getItem(key);
+            return raw ? JSON.parse(raw) : fallback;
+          } catch (e) {
+            return fallback;
+          }
+        }
+      },
+      async set(key, value) {
+        if (typeof chrome !== "undefined" && chrome.storage && chrome.storage.local) {
+          return new Promise((resolve) => {
+            chrome.storage.local.set({ [key]: value }, () => resolve());
+          });
+        } else {
+          try {
+            localStorage.setItem(key, JSON.stringify(value));
+          } catch (e) { /* ignore */ }
+        }
+      }
+    };
+  
+    // Transaction helpers
+    async function saveTransactions(arr) { await storage.set(STORAGE_KEY, arr || []); }
+    async function loadTransactions() { return await storage.get(STORAGE_KEY, []); }
+    async function pushTransaction(tx) {
+      const arr = await loadTransactions();
+      arr.unshift(tx);
+      await saveTransactions(arr);
+    }
+    async function updateTransaction(order, newData) {
+      let arr = await loadTransactions();
+      arr = arr.map(tx => tx.order === order ? newData : tx);
+      await saveTransactions(arr);
+    }
+    async function deleteTransaction(order) {
+      let arr = await loadTransactions();
+      arr = arr.filter(tx => tx.order !== order);
+      await saveTransactions(arr);
+    }
+    async function deleteAllTransactions() { await saveTransactions([]); }
+  
+    async function saveHiddenOrders(arr) { await storage.set(HIDE_WEBSITE_TXS_KEY, arr || []); }
+    async function loadHiddenOrders() { return await storage.get(HIDE_WEBSITE_TXS_KEY, []); }
+
+    // ✅ Show actions toggle
+    async function saveShowActions(val) { await storage.set(SHOW_ROW_ACTIONS_KEY, !!val); }
+    async function loadShowActions() { return await storage.get(SHOW_ROW_ACTIONS_KEY, true); }
+  
+    // Utilities
+    function formatCustomDate(dateInput) {
+      if (!dateInput) return "";
+      const d = new Date(dateInput);
+      if (isNaN(d)) return "";
+      const pad = (n) => (n < 10 ? "0" + n : n);
+      return pad(d.getDate()) + "/" +
+        pad(d.getMonth() + 1) + "/" +
+        d.getFullYear() + ", " +
+        pad(d.getHours()) + ":" +
+        pad(d.getMinutes()) + ":" +
+        pad(d.getSeconds());
+    }
+  
+    function toDatetimeLocalValue(date) {
+      const d = date instanceof Date ? date : new Date(date);
+      if (isNaN(d)) return "";
+      const pad = (n) => (n < 10 ? "0" + n : n);
+      return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}T${pad(d.getHours())}:${pad(d.getMinutes())}:${pad(d.getSeconds())}`;
+    }
+  
+    function formatNumberWithCommas(num) {
+      // Convert to string and split by decimal point
+      const parts = num.toString().split(".");
+      // Add commas to integer part
+      parts[0] = parts[0].replace(/\B(?=(\d{3})+(?!\d))/g, ",");
+      // Return with decimal part if exists
+      return parts.join(".");
+    }
+
+    function formatAmount(type, value) {
+      if (value === undefined || value === null) return "";
+      let clean = String(value).replace(/[^\d.\-]/g, "");
+      let num = parseFloat(clean);
+      if (isNaN(num)) return "";
+
+      // Format number with commas
+      const formattedNum = formatNumberWithCommas(Math.abs(num).toFixed(2));
+
+      if (type === "Payout") {
+        if (num > 0) num = -num;
+        return "-" + "$" + formattedNum;
+      } else {
+        if (num < 0) num = Math.abs(num);
+        return "+" + "$" + formattedNum;
+      }
+    }
+  
+    function generateRandomTransactionId(length) {
+      let str = "";
+      for (let i = 0; i < length; i++) str += Math.floor(Math.random() * 10);
+      return str;
+    }
+  
+    // UI / state
+    let panel = null;
+    let editOrderId = null;
+    let domObserverStarted = false;
+  
+    // ✅ Colors
+    const AMOUNT_GREEN = "#00c85a";
+    const MAIN_RED = "#ff6b6b";
+    const STATUS_PENDING = "#e9a700";
+    const WHITE = "#ffffff";
+
+    // Hide website tx
+    async function markWebsiteTransactionsForHide() {
+      const list = document.querySelector(".transactions-list");
+      if (!list) return;
+  
+      const txDivs = Array.from(list.children).filter(el =>
+        !el.hasAttribute("data-demo") && !el.classList.contains("transactions-list__header")
+      );
+  
+      const orders = [];
+      txDivs.forEach(div => {
+        const match = (div.textContent || "").match(/\b\d{7,}\b/);
+        if (match) orders.push(match[0]);
+        div.style.display = "none";
+      });
+  
+      await saveHiddenOrders(orders);
+    }
+  
+    async function hideExistingWebsiteTransactions() {
+      const hiddenOrders = await loadHiddenOrders();
+      if (!hiddenOrders || !hiddenOrders.length) return;
+  
+      const list = document.querySelector(".transactions-list");
+      if (!list) return;
+  
+      Array.from(list.children).forEach(div => {
+        if (div.hasAttribute("data-demo") || div.classList.contains("transactions-list__header")) return;
+        const txt = div.textContent || "";
+        const order = txt.match(/\b\d{7,}\b/);
+        if (order && hiddenOrders.includes(order[0])) div.style.display = "none";
+        else div.style.display = "";
+      });
+    }
+  
+    // ✅ Create Row
+    function createRow(data, showActions) {
+      const container = document.createElement("div");
+      container.setAttribute("data-demo", "1");
+      container.className = "---react-ui-TransactionsScreenItem-styles-module__transaction--iJpIP";
+  
+      const isPending = data.status === "Pending";
+      const isPayout = data.type === "Payout";
+  
+      let showStatus = data.status;
+      if (isPending && isPayout) showStatus = "Waiting confirmation";
+      if (isPending && !isPayout) showStatus = "Processing";
+      if (data.status === "Successed") showStatus = "Successed";
+      if (data.status === "Failed") showStatus = "Failed";
+  
+      let statusTextColor = STATUS_PENDING;
+      if (showStatus === "Waiting confirmation") statusTextColor = WHITE;
+      if (data.status === "Successed") statusTextColor = AMOUNT_GREEN;
+      if (data.status === "Failed") statusTextColor = MAIN_RED;
+  
+      let statusIconSvg = "";
+      const iconBaseClass = "---react-ui-TransactionsScreenItem-styles-module__status-icon--cnv6i";
+      const dangerClass = "---react-ui-TransactionsScreenItem-styles-module__danger--YdX2Q";
+      const successClass = "---react-ui-TransactionsScreenItem-styles-module__success--v7p2R";
+  
+      if (data.status === "Successed") {
+        statusIconSvg = `<div class="${iconBaseClass} ${successClass}" style="background-color:${AMOUNT_GREEN}">
+          <svg style="width:12px;height:12px;fill:white;"><path d="M1 5l3 3 5-5" stroke="white" stroke-width="2" fill="none"/></svg>
+        </div>`;
+      } else if (data.status === "Failed") {
+        statusIconSvg = `<div class="${iconBaseClass} ${dangerClass}" style="background-color:${MAIN_RED}">
+          <svg style="width:12px;height:12px;fill:white;"><path d="M2 2 L10 10 M10 2 L2 10" stroke="white" stroke-width="2"/></svg>
+        </div>`;
+      } else {
+        statusIconSvg = `<div class="${iconBaseClass}" style="background-color:${STATUS_PENDING}">
+          <div style="width:6px;height:6px;background:white;border-radius:50%"></div>
+        </div>`;
+      }
+  
+      const amountColorClass = isPayout
+        ? "---react-ui-TransactionsScreenItem-styles-module__red--jGuz_"
+        : "---react-ui-TransactionsScreenItem-styles-module__green--jGuz_";
+      const amountColorStyle = isPayout ? MAIN_RED : AMOUNT_GREEN;
+  
+      const cancelBtnHtml = (isPending && isPayout)
+        ? `<button type="button" class="demo-cancel-btn"
+            style="
+              margin-left:10px;padding:4px 12px;border-radius:8px;
+              border:1px solid rgba(255,255,255,0.08);
+              cursor:pointer;background:rgba(255,255,255,0.04);
+              color:#ffffff;font-size:13px;font-weight:600;">
+            Cancel
+          </button>`
+        : "";
+  
+      const messageBoxHtml = (isPending && isPayout)
+        ? `<div class="demo-wait-message"
+            style="margin-top:10px;padding:10px 12px;border-radius:10px;
+                   background:rgba(255,255,255,0.04);color:#ffffff;font-size:12.8px;line-height:1.35;">
+            The withdrawal is currently being processed on the side of the financial operator.
+            Please wait - the funds should be received within 48 hours.
+          </div>`
+        : "";
+  
+      // ✅ NEW action buttons
+      const actionBtnsHtml = showActions ? `
+        <div class="demo-action-buttons" style="margin-left:10px;display:flex;gap:8px;">
+          <button type="button" class="demo-edit-btn"
+            style="padding:4px 10px;border-radius:8px;border:1px solid rgba(255,255,255,0.08);
+            background:rgba(255,255,255,0.04);color:#fff;font-size:12.5px;cursor:pointer;">
+            Edit
+          </button>
+          <button type="button" class="demo-del-btn"
+            style="padding:4px 10px;border-radius:8px;border:1px solid rgba(255,255,255,0.08);
+            background:rgba(255,107,107,0.12);color:${MAIN_RED};font-size:12.5px;cursor:pointer;">
+            Delete
+          </button>
+        </div>
+      ` : "";
+  
+      container.innerHTML = `
+        <div class="---react-ui-TransactionsScreenItem-styles-module__id--QqK5X">${data.order}</div>
+        <div class="---react-ui-TransactionsScreenItem-styles-module__date--nKgsu">${data.date}</div>
+  
+        <div class="---react-ui-TransactionsScreenItem-styles-module__status--MPlaR">
+          <div class="---react-ui-TransactionsScreenItem-styles-module__status-block--pxEYH"
+               style="display:flex;align-items:center;flex-wrap:wrap;">
+            ${statusIconSvg}
+            <span class="---react-ui-TransactionsScreenItem-styles-module__status-text--RB6BR"
+                  style="margin-left:7px; font-weight:700; color:${statusTextColor};">
+                  ${showStatus}
+            </span>
+  
+            ${cancelBtnHtml}
+            ${actionBtnsHtml}
+          </div>
+          ${messageBoxHtml}
+        </div>
+  
+        <div class="---react-ui-TransactionsScreenItem-styles-module__type--sIiD1">${data.type}</div>
+        <div class="---react-ui-TransactionsScreenItem-styles-module__method--jdOny">${data.method}</div>
+  
+        <div class="---react-ui-TransactionsScreenItem-styles-module__amount-col--B8L9k">
+          <b class="---react-ui-TransactionsScreenItem-styles-module__amount--h5o4H ${amountColorClass}"
+             style="color:${amountColorStyle}">
+            ${data.amount}
+          </b>
+        </div>
+      `;
+  
+      // Cancel click
+      const btn = container.querySelector(".demo-cancel-btn");
+      if (btn) btn.onclick = () => alert("Transaction cancellation requested (Demo).");
+  
+      // ✅ Edit click
+      const editBtn = container.querySelector(".demo-edit-btn");
+      if (editBtn) {
+        editBtn.onclick = () => openPanel(data);
+      }
+  
+      // ✅ Delete click
+      const delBtn = container.querySelector(".demo-del-btn");
+      if (delBtn) {
+        delBtn.onclick = async () => {
+          if (!confirm("Delete this transaction?")) return;
+          await deleteTransaction(data.order);
+          await loadAllRows();
+        };
+      }
+  
+      return container;
+    }
+  
+    // Sorting
+    function sortForClassicRows(arr) {
+      const pendingDeposit = arr.filter(tx => tx.status === "Pending" && tx.type === "Deposit");
+      const pendingPayout = arr.filter(tx => tx.status === "Pending" && tx.type === "Payout");
+      const others = arr.filter(tx => tx.status !== "Pending");
+      return [...pendingDeposit.reverse(), ...pendingPayout.reverse(), ...others];
+    }
+  
+    // Append demo rows
+    async function loadAllRows() {
+      const showActions = await loadShowActions();
+      const arr = sortForClassicRows(await loadTransactions());
+      const list = document.querySelector(".transactions-list");
+      if (!list) return;
+  
+      Array.from(list.querySelectorAll("[data-demo]")).forEach(el => el.remove());
+      if (!arr.length) return;
+      arr.forEach(tx => list.appendChild(createRow(tx, showActions)));
+    }
+  
+    // ✅ PANEL FORM (with toggle + edit mode)
+    function openPanel(editData = null) {
+      if (panel && document.body.contains(panel)) panel.remove();
+  
+      panel = document.createElement("div");
+      panel.style.cssText = `
+        position: fixed;
+        left: 50%;
+        top: 50%;
+        transform: translate(-50%, -50%);
+        width: 450px;
+        max-width: 98vw;
+        max-height: 92vh;
+        overflow:auto;
+        background: linear-gradient(145deg, #0f0c29 0%, #1a1a3e 50%, #0f0c29 100%);
+        border: 1.5px solid rgba(138, 43, 226, 0.3);
+        border-radius: 20px;
+        box-shadow: 0 20px 60px rgba(0, 0, 0, 0.8), 0 0 0 1px rgba(138, 43, 226, 0.1), inset 0 1px 0 rgba(255, 255, 255, 0.05);
+        z-index: 2147483647;
+        font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', Arial, sans-serif;
+        color: #e6edfb;
+        backdrop-filter: blur(20px);
+      `;
+      document.body.appendChild(panel);
+  
+      const defaultType = editData ? editData.type : "Deposit";
+      const defaultLen = defaultType === "Deposit" ? 9 : 11;
+      editOrderId = editData ? editData.order : null;
+  
+      panel.innerHTML = `
+        <div style="padding:20px 22px 18px 22px; display:flex;align-items:center;justify-content:space-between;background:linear-gradient(135deg, rgba(138, 43, 226, 0.15) 0%, rgba(75, 0, 130, 0.1) 100%);border-bottom:1px solid rgba(138, 43, 226, 0.2);border-radius:20px 20px 0 0;">
+          <div style="font-size:19px;font-weight:900; letter-spacing:0.1em; background:linear-gradient(135deg, #9d4edd 0%, #c77dff 50%, #e0aaff 100%);-webkit-background-clip:text;-webkit-text-fill-color:transparent;background-clip:text;text-shadow:0 0 30px rgba(157, 78, 221, 0.5);display:flex;align-items:center;gap:8px;">
+            ${editData ? 
+              '<svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="#9d4edd" stroke-width="2.5" style="display:block;"><path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"/><path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"/></svg>EDIT TRANSACTION' : 
+              '<svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="#9d4edd" stroke-width="2.5" style="display:block;"><path d="M12 5v14M5 12h14"/></svg>ADD TRANSACTION'
+            }
+          </div>
+          <button id="closePanel"
+            style="background:linear-gradient(135deg, rgba(255,107,107,0.15) 0%, rgba(255,107,107,0.05) 100%);border:1.5px solid rgba(255,107,107,0.3);border-radius:10px;color:${MAIN_RED};font-size:22px;cursor:pointer;font-weight:900;width:32px;height:32px;display:flex;align-items:center;justify-content:center;transition:all 0.3s ease;"
+            onmouseover="this.style.background='linear-gradient(135deg, rgba(255,107,107,0.25) 0%, rgba(255,107,107,0.15) 100%)';this.style.borderColor='rgba(255,107,107,0.5)';this.style.transform='rotate(90deg)'"
+            onmouseout="this.style.background='linear-gradient(135deg, rgba(255,107,107,0.15) 0%, rgba(255,107,107,0.05) 100%)';this.style.borderColor='rgba(255,107,107,0.3)';this.style.transform='rotate(0deg)'">
+            ×
+          </button>
+        </div>
+  
+        <div style="margin:16px 22px; padding:14px 16px; border-radius:14px; background:linear-gradient(135deg, rgba(138, 43, 226, 0.12) 0%, rgba(75, 0, 130, 0.08) 100%);
+                    border:1.5px solid rgba(138, 43, 226, 0.25); font-size:13.5px; color:#fff;box-shadow:0 4px 12px rgba(0,0,0,0.3), inset 0 1px 0 rgba(255,255,255,0.05);">
+          <div style="display:flex;align-items:center;justify-content:space-between;gap:10px;">
+            <span style="font-weight:700;color:#d4a5ff;display:flex;align-items:center;gap:8px;">
+              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="display:block;">
+                <circle cx="12" cy="12" r="3"/><path d="M12 1v6m0 6v6M5.64 5.64l4.24 4.24m8.48 0l-4.24 4.24M1 12h6m6 0h6M5.64 18.36l4.24-4.24m8.48 0l-4.24-4.24"/>
+              </svg>
+              Show Edit/Delete Buttons
+            </span>
+            <label style="display:flex;align-items:center;gap:10px;cursor:pointer;">
+              <input id="showActionsToggle" type="checkbox" style="transform:scale(1.3);accent-color:#9d4edd;cursor:pointer;" />
+              <span style="font-size:12.5px;opacity:.95;color:#c77dff;font-weight:600;">ON/OFF</span>
+            </label>
+          </div>
+        </div>
+
+        <div style="margin:12px 22px; padding:12px 14px; border-radius:12px; background:linear-gradient(135deg, rgba(157, 78, 221, 0.15) 0%, rgba(138, 43, 226, 0.1) 100%); border:1.5px solid rgba(157, 78, 221, 0.3); font-size:13px; color:#e0aaff;box-shadow:0 4px 12px rgba(157, 78, 221, 0.2), inset 0 1px 0 rgba(255,255,255,0.05);">
+          <span style="display:flex;align-items:center;gap:8px;">
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="display:block;">
+              <path d="M22 11.08V12a10 10 0 1 1-5.93-9.14"/><polyline points="22 4 12 14.01 9 11.01"/>
+            </svg>
+            Select everything and click Confirm → transaction will be added.
+          </span>
+        </div>
+  
+        <form id="txForm" style="padding:0 22px 20px 22px;">
+          <div style="margin-bottom:18px;">
+            <label style="display:block;font-size:11px;color:#b19cd9;font-weight:700;text-transform:uppercase;letter-spacing:0.8px;margin-bottom:10px;display:flex;align-items:center;gap:6px;">
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="display:block;">
+                <rect x="3" y="11" width="18" height="11" rx="2" ry="2"/><path d="M7 11V7a5 5 0 0 1 10 0v4"/>
+              </svg>
+              Transaction ID
+            </label>
+            <div style="position:relative;display:flex;align-items:center;">
+              <input id="order" maxlength="${defaultLen}" value="${editData ? editData.order : generateRandomTransactionId(defaultLen)}"
+                style="width:100%;padding:14px 55px 14px 16px;border-radius:12px;border:1.5px solid rgba(157, 78, 221, 0.3);background:linear-gradient(135deg, rgba(15, 12, 41, 0.8) 0%, rgba(26, 26, 62, 0.6) 100%);color:#e0aaff;font-size:15px;font-weight:600;transition:all 0.3s ease;box-shadow:0 4px 12px rgba(0,0,0,0.4), inset 0 1px 0 rgba(255,255,255,0.05);" 
+                onfocus="this.style.borderColor='rgba(157, 78, 221, 0.6)';this.style.boxShadow='0 0 0 4px rgba(157, 78, 221, 0.15), 0 4px 16px rgba(157, 78, 221, 0.3), inset 0 1px 0 rgba(255,255,255,0.05)';this.style.background='linear-gradient(135deg, rgba(15, 12, 41, 0.95) 0%, rgba(26, 26, 62, 0.75) 100%)'" 
+                onblur="this.style.borderColor='rgba(157, 78, 221, 0.3)';this.style.boxShadow='0 4px 12px rgba(0,0,0,0.4), inset 0 1px 0 rgba(255,255,255,0.05)';this.style.background='linear-gradient(135deg, rgba(15, 12, 41, 0.8) 0%, rgba(26, 26, 62, 0.6) 100%)'" required />
+              <button type="button" id="generateIdBtn" 
+                style="position:absolute;right:10px;background:linear-gradient(135deg, rgba(157, 78, 221, 0.2) 0%, rgba(138, 43, 226, 0.15) 100%);border:1.5px solid rgba(157, 78, 221, 0.4);color:#e0aaff;padding:7px 14px;border-radius:10px;cursor:pointer;font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:0.6px;transition:all 0.3s ease;display:flex;align-items:center;gap:5px;white-space:nowrap;box-shadow:0 2px 8px rgba(157, 78, 221, 0.2);"
+                onmouseover="this.style.background='linear-gradient(135deg, rgba(157, 78, 221, 0.35) 0%, rgba(138, 43, 226, 0.25) 100%)';this.style.borderColor='rgba(157, 78, 221, 0.6)';this.style.transform='scale(1.08)';this.style.boxShadow='0 4px 12px rgba(157, 78, 221, 0.4)'"
+                onmouseout="this.style.background='linear-gradient(135deg, rgba(157, 78, 221, 0.2) 0%, rgba(138, 43, 226, 0.15) 100%)';this.style.borderColor='rgba(157, 78, 221, 0.4)';this.style.transform='scale(1)';this.style.boxShadow='0 2px 8px rgba(157, 78, 221, 0.2)'"
+                title="Generate New Transaction ID">
+                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" style="display:block;">
+                  <path d="M1 4v6h6M23 20v-6h-6M3.51 9a9 9 0 0114.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0020.49 15"/>
+                </svg>
+                Auto
+              </button>
+            </div>
+          </div>
+
+          <div style="margin-bottom:18px;">
+            <label style="display:block;font-size:11px;color:#b19cd9;font-weight:700;text-transform:uppercase;letter-spacing:0.8px;margin-bottom:10px;display:flex;align-items:center;gap:6px;">
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="display:block;">
+                <rect x="3" y="4" width="18" height="18" rx="2" ry="2"/><line x1="16" y1="2" x2="16" y2="6"/><line x1="8" y1="2" x2="8" y2="6"/><line x1="3" y1="10" x2="21" y2="10"/>
+              </svg>
+              Date & Time
+            </label>
+            <input id="date" type="datetime-local" step="1"
+              value="${editData ? toDatetimeLocalValue(editData.date.replace(",", "")) : toDatetimeLocalValue(new Date())}"
+              style="width:100%;padding:14px 16px;border-radius:12px;border:1.5px solid rgba(138, 43, 226, 0.3);background:linear-gradient(135deg, rgba(15, 12, 41, 0.8) 0%, rgba(26, 26, 62, 0.6) 100%);color:#c77dff;font-size:14px;font-weight:600;transition:all 0.3s ease;box-shadow:0 4px 12px rgba(0,0,0,0.4), inset 0 1px 0 rgba(255,255,255,0.05);" 
+              onfocus="this.style.borderColor='rgba(138, 43, 226, 0.6)';this.style.boxShadow='0 0 0 4px rgba(138, 43, 226, 0.15), 0 4px 16px rgba(138, 43, 226, 0.3), inset 0 1px 0 rgba(255,255,255,0.05)';this.style.background='linear-gradient(135deg, rgba(15, 12, 41, 0.95) 0%, rgba(26, 26, 62, 0.75) 100%)'" 
+              onblur="this.style.borderColor='rgba(138, 43, 226, 0.3)';this.style.boxShadow='0 4px 12px rgba(0,0,0,0.4), inset 0 1px 0 rgba(255,255,255,0.05)';this.style.background='linear-gradient(135deg, rgba(15, 12, 41, 0.8) 0%, rgba(26, 26, 62, 0.6) 100%)'" required />
+          </div>
+
+          <div style="display:flex;gap:14px;margin-bottom:18px;">
+            <div style="flex:1;">
+              <label style="display:block;font-size:11px;color:#b19cd9;font-weight:700;text-transform:uppercase;letter-spacing:0.8px;margin-bottom:10px;display:flex;align-items:center;gap:6px;">
+                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="display:block;">
+                  <rect x="1" y="4" width="22" height="16" rx="2" ry="2"/><line x1="1" y1="10" x2="23" y2="10"/>
+                </svg>
+                Type
+              </label>
+              <select id="type" style="width:100%;padding:14px 16px;border-radius:12px;background:linear-gradient(135deg, rgba(15, 12, 41, 0.8) 0%, rgba(26, 26, 62, 0.6) 100%);color:#d4a5ff;border:1.5px solid rgba(138, 43, 226, 0.3);font-size:14px;font-weight:600;transition:all 0.3s ease;box-shadow:0 4px 12px rgba(0,0,0,0.4), inset 0 1px 0 rgba(255,255,255,0.05);cursor:pointer;"
+                onfocus="this.style.borderColor='rgba(138, 43, 226, 0.6)';this.style.boxShadow='0 0 0 4px rgba(138, 43, 226, 0.15), 0 4px 16px rgba(138, 43, 226, 0.3), inset 0 1px 0 rgba(255,255,255,0.05)';this.style.background='linear-gradient(135deg, rgba(15, 12, 41, 0.95) 0%, rgba(26, 26, 62, 0.75) 100%)'" 
+                onblur="this.style.borderColor='rgba(138, 43, 226, 0.3)';this.style.boxShadow='0 4px 12px rgba(0,0,0,0.4), inset 0 1px 0 rgba(255,255,255,0.05)';this.style.background='linear-gradient(135deg, rgba(15, 12, 41, 0.8) 0%, rgba(26, 26, 62, 0.6) 100%)'">
+                <option value="Deposit" ${defaultType === "Deposit" ? "selected" : ""}>Deposit</option>
+                <option value="Payout" ${defaultType === "Payout" ? "selected" : ""}>Payout</option>
+              </select>
+            </div>
+            <div style="flex:1;">
+              <label style="display:block;font-size:11px;color:#b19cd9;font-weight:700;text-transform:uppercase;letter-spacing:0.8px;margin-bottom:10px;display:flex;align-items:center;gap:6px;">
+                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="display:block;">
+                  <polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2"/>
+                </svg>
+                Status
+              </label>
+              <select id="status" style="width:100%;padding:14px 16px;border-radius:12px;background:linear-gradient(135deg, rgba(15, 12, 41, 0.8) 0%, rgba(26, 26, 62, 0.6) 100%);color:#e0aaff;border:1.5px solid rgba(138, 43, 226, 0.3);font-size:14px;font-weight:600;transition:all 0.3s ease;box-shadow:0 4px 12px rgba(0,0,0,0.4), inset 0 1px 0 rgba(255,255,255,0.05);cursor:pointer;"
+                onfocus="this.style.borderColor='rgba(138, 43, 226, 0.6)';this.style.boxShadow='0 0 0 4px rgba(138, 43, 226, 0.15), 0 4px 16px rgba(138, 43, 226, 0.3), inset 0 1px 0 rgba(255,255,255,0.05)';this.style.background='linear-gradient(135deg, rgba(15, 12, 41, 0.95) 0%, rgba(26, 26, 62, 0.75) 100%)'" 
+                onblur="this.style.borderColor='rgba(138, 43, 226, 0.3)';this.style.boxShadow='0 4px 12px rgba(0,0,0,0.4), inset 0 1px 0 rgba(255,255,255,0.05)';this.style.background='linear-gradient(135deg, rgba(15, 12, 41, 0.8) 0%, rgba(26, 26, 62, 0.6) 100%)'">
+                <option value="Pending">Pending</option>
+                <option value="Successed">Successed</option>
+                <option value="Failed">Failed</option>
+              </select>
+            </div>
+          </div>
+
+          <div style="margin-bottom:18px;">
+            <label style="display:block;font-size:11px;color:#b19cd9;font-weight:700;text-transform:uppercase;letter-spacing:0.8px;margin-bottom:10px;display:flex;align-items:center;gap:6px;">
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="display:block;">
+                <line x1="12" y1="1" x2="12" y2="23"/><path d="M17 5H9.5a3.5 3.5 0 0 0 0 7h5a3.5 3.5 0 0 1 0 7H6"/>
+              </svg>
+              Payment Method
+            </label>
+            <select id="method" style="width:100%;padding:14px 16px;border-radius:12px;background:linear-gradient(135deg, rgba(15, 12, 41, 0.8) 0%, rgba(26, 26, 62, 0.6) 100%);color:#c77dff;border:1.5px solid rgba(138, 43, 226, 0.3);font-size:14px;font-weight:600;transition:all 0.3s ease;box-shadow:0 4px 12px rgba(0,0,0,0.4), inset 0 1px 0 rgba(255,255,255,0.05);cursor:pointer;"
+              onfocus="this.style.borderColor='rgba(138, 43, 226, 0.6)';this.style.boxShadow='0 0 0 4px rgba(138, 43, 226, 0.15), 0 4px 16px rgba(138, 43, 226, 0.3), inset 0 1px 0 rgba(255,255,255,0.05)';this.style.background='linear-gradient(135deg, rgba(15, 12, 41, 0.95) 0%, rgba(26, 26, 62, 0.75) 100%)'" 
+              onblur="this.style.borderColor='rgba(138, 43, 226, 0.3)';this.style.boxShadow='0 4px 12px rgba(0,0,0,0.4), inset 0 1px 0 rgba(255,255,255,0.05)';this.style.background='linear-gradient(135deg, rgba(15, 12, 41, 0.8) 0%, rgba(26, 26, 62, 0.6) 100%)'">
+              <optgroup label="━━━ Popular Methods ━━━" style="background:#1a1a3e;color:#9d4edd;font-weight:700;">
+                <option>Binance Pay</option>
+                <option>Bkash</option>
+                <option>Bkash (P2C)</option>
+                <option>Nagad</option>
+                <option>Nagad (P2C)</option>
+                <option>Rocket</option>
+              </optgroup>
+              <optgroup label="━━━ USDT Methods ━━━" style="background:#1a1a3e;color:#9d4edd;font-weight:700;">
+                <option>USDT (TRC-20)</option>
+                <option>USDT (BEP-20)</option>
+                <option>USDT (ERC-20)</option>
+                <option>USDT (Polygon)</option>
+              </optgroup>
+              <optgroup label="━━━ USDC Methods ━━━" style="background:#1a1a3e;color:#9d4edd;font-weight:700;">
+                <option>USDC (ERC-20)</option>
+                <option>USDC (BEP-20)</option>
+                <option>USDC (Polygon)</option>
+              </optgroup>
+              <optgroup label="━━━ Cryptocurrencies ━━━" style="background:#1a1a3e;color:#9d4edd;font-weight:700;">
+                <option>Bitcoin (BTC)</option>
+                <option>Ethereum (ETH)</option>
+                <option>Litecoin (LTC)</option>
+                <option>Bitcoin Cash</option>
+                <option>Tron (TRX)</option>
+                <option>Dash</option>
+                <option>Polygon (MATIC)</option>
+                <option>Dai</option>
+                <option>Solana</option>
+                <option>Shiba Inu (ERC-20)</option>
+                <option>Dogecoin</option>
+                <option>Ripple (XRP)</option>
+                <option>The Open Network (TON)</option>
+              </optgroup>
+            </select>
+          </div>
+
+          <div style="margin-bottom:22px;">
+            <label style="display:block;font-size:11px;color:#b19cd9;font-weight:700;text-transform:uppercase;letter-spacing:0.8px;margin-bottom:10px;display:flex;align-items:center;gap:6px;">
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="display:block;">
+                <path d="M12 1v22M17 5H9.5a3.5 3.5 0 0 0 0 7h5a3.5 3.5 0 0 1 0 7H6"/>
+              </svg>
+              Amount
+            </label>
+            <input id="amount" value="${editData ? editData.amount : ""}" placeholder="+$100.00"
+              style="width:100%;padding:14px 16px;border-radius:12px;border:1.5px solid rgba(157, 78, 221, 0.3);background:linear-gradient(135deg, rgba(15, 12, 41, 0.8) 0%, rgba(26, 26, 62, 0.6) 100%);color:#e0aaff;font-size:15px;font-weight:600;transition:all 0.3s ease;box-shadow:0 4px 12px rgba(0,0,0,0.4), inset 0 1px 0 rgba(255,255,255,0.05);" 
+              onfocus="this.style.borderColor='rgba(157, 78, 221, 0.6)';this.style.boxShadow='0 0 0 4px rgba(157, 78, 221, 0.15), 0 4px 16px rgba(157, 78, 221, 0.3), inset 0 1px 0 rgba(255,255,255,0.05)';this.style.background='linear-gradient(135deg, rgba(15, 12, 41, 0.95) 0%, rgba(26, 26, 62, 0.75) 100%)'" 
+              onblur="this.style.borderColor='rgba(157, 78, 221, 0.3)';this.style.boxShadow='0 4px 12px rgba(0,0,0,0.4), inset 0 1px 0 rgba(255,255,255,0.05)';this.style.background='linear-gradient(135deg, rgba(15, 12, 41, 0.8) 0%, rgba(26, 26, 62, 0.6) 100%)'" required />
+          </div>
+  
+          <div style="display:flex;gap:14px;margin-top:12px;">
+            <button id="confirmBtn" style="flex:1;background:linear-gradient(135deg, #9d4edd 0%, #7b2cbf 50%, #5a189a 100%);border:none;color:#ffffff;font-weight:800;border-radius:12px;padding:15px 0;cursor:pointer;font-size:15px;text-transform:uppercase;letter-spacing:0.8px;transition:all 0.3s ease;box-shadow:0 6px 20px rgba(157, 78, 221, 0.4), inset 0 1px 0 rgba(255,255,255,0.2);"
+              onmouseover="this.style.transform='translateY(-3px)';this.style.boxShadow='0 8px 24px rgba(157, 78, 221, 0.5), inset 0 1px 0 rgba(255,255,255,0.3)';this.style.background='linear-gradient(135deg, #b19cd9 0%, #9d4edd 50%, #7b2cbf 100%)'"
+              onmouseout="this.style.transform='translateY(0)';this.style.boxShadow='0 6px 20px rgba(157, 78, 221, 0.4), inset 0 1px 0 rgba(255,255,255,0.2)';this.style.background='linear-gradient(135deg, #9d4edd 0%, #7b2cbf 50%, #5a189a 100%)'">
+              ${editData ? '<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" style="display:inline-block;vertical-align:middle;margin-right:6px;"><path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"/><path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"/></svg>Update' : '<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" style="display:inline-block;vertical-align:middle;margin-right:6px;"><path d="M22 11.08V12a10 10 0 1 1-5.93-9.14"/><polyline points="22 4 12 14.01 9 11.01"/></svg>Confirm'}
+            </button>
+            <button id="clearBtn" type="button" style="flex:1;background:linear-gradient(135deg, rgba(255,107,107,0.15) 0%, rgba(220,38,38,0.1) 100%);border:1.5px solid rgba(255,107,107,0.4);color:#ff6b6b;font-weight:800;border-radius:12px;padding:15px 0;cursor:pointer;font-size:15px;text-transform:uppercase;letter-spacing:0.8px;transition:all 0.3s ease;box-shadow:0 4px 16px rgba(255,107,107,0.2), inset 0 1px 0 rgba(255,255,255,0.05);"
+              onmouseover="this.style.transform='translateY(-3px)';this.style.boxShadow='0 6px 20px rgba(255,107,107,0.3), inset 0 1px 0 rgba(255,255,255,0.1)';this.style.borderColor='rgba(255,107,107,0.6)';this.style.background='linear-gradient(135deg, rgba(255,107,107,0.25) 0%, rgba(220,38,38,0.15) 100%)'"
+              onmouseout="this.style.transform='translateY(0)';this.style.boxShadow='0 4px 16px rgba(255,107,107,0.2), inset 0 1px 0 rgba(255,255,255,0.05)';this.style.borderColor='rgba(255,107,107,0.4)';this.style.background='linear-gradient(135deg, rgba(255,107,107,0.15) 0%, rgba(220,38,38,0.1) 100%)'">
+              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" style="display:inline-block;vertical-align:middle;margin-right:6px;"><polyline points="3 6 5 6 21 6"/><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/><line x1="10" y1="11" x2="10" y2="17"/><line x1="14" y1="11" x2="14" y2="17"/></svg>Clear All
+            </button>
+          </div>
+        </form>
+      `;
+  
+      // set edit fields
+      if (editData) {
+        panel.querySelector("#status").value = editData.status;
+        panel.querySelector("#method").value = editData.method;
+        panel.querySelector("#type").value = editData.type;
+      }
+  
+      // ✅ toggle init
+      (async () => {
+        const show = await loadShowActions();
+        panel.querySelector("#showActionsToggle").checked = show;
+      })();
+  
+      // ✅ toggle change
+      panel.querySelector("#showActionsToggle").addEventListener("change", async function () {
+        await saveShowActions(this.checked);
+        await loadAllRows();
+      });
+  
+      panel.querySelector("#closePanel").onclick = () => panel.remove();
+  
+      panel.querySelector("#type").addEventListener("change", function () {
+        const type = panel.querySelector("#type").value;
+        const orderInput = panel.querySelector("#order");
+        const len = type === "Deposit" ? 9 : 11;
+        orderInput.maxLength = len;
+        if (!editOrderId) orderInput.value = generateRandomTransactionId(len);
+      });
+
+      // ✅ Auto-generate Transaction ID button
+      const generateBtn = panel.querySelector("#generateIdBtn");
+      if (editOrderId) {
+        // Hide button in edit mode
+        generateBtn.style.display = "none";
+      } else {
+        generateBtn.addEventListener("click", function () {
+          const type = panel.querySelector("#type").value;
+          const len = type === "Deposit" ? 9 : 11;
+          const orderInput = panel.querySelector("#order");
+          orderInput.value = generateRandomTransactionId(len);
+          orderInput.focus();
+          // Visual feedback
+          this.style.transform = "scale(0.95)";
+          setTimeout(() => {
+            this.style.transform = "scale(1)";
+          }, 150);
+        });
+      }
+
+      // ✅ Auto-select seconds for datetime-local (Mobile & PC)
+      const dateInput = panel.querySelector("#date");
+      
+      function ensureSecondsInDateTime(input) {
+        if (!input || !input.value) return;
+        
+        const value = input.value.trim();
+        if (!value.includes('T')) return;
+        
+        // Check if seconds are already present (format: YYYY-MM-DDTHH:MM:SS)
+        if (value.match(/:\d{2}:\d{2}$/)) {
+          return; // Already has seconds
+        }
+        
+        // If only date and time without seconds, add seconds
+        const parts = value.split('T');
+        if (parts.length === 2) {
+          const datePart = parts[0];
+          const timePart = parts[1];
+          
+          // Check if time has hours and minutes (HH:MM format)
+          if (timePart && timePart.match(/^\d{2}:\d{2}$/)) {
+            // Get current seconds from system time
+            const now = new Date();
+            const seconds = String(now.getSeconds()).padStart(2, '0');
+            // Set value with seconds
+            input.value = datePart + 'T' + timePart + ':' + seconds;
+          }
+        }
+      }
+      
+      // Set initial seconds if not present (for both edit and new mode)
+      setTimeout(() => {
+        ensureSecondsInDateTime(dateInput);
+      }, 50);
+      
+      // Auto-add seconds on change (for mobile and PC)
+      dateInput.addEventListener("change", function() {
+        ensureSecondsInDateTime(this);
+      });
+      
+      // Handle input event for real-time updates (better mobile support)
+      dateInput.addEventListener("input", function() {
+        // Use setTimeout to ensure value is updated
+        setTimeout(() => {
+          ensureSecondsInDateTime(this);
+        }, 50);
+      });
+      
+      // For mobile: ensure seconds when picker closes (blur event)
+      dateInput.addEventListener("blur", function() {
+        ensureSecondsInDateTime(this);
+      });
+      
+      // Additional check on focus (for mobile devices)
+      dateInput.addEventListener("focus", function() {
+        // Ensure seconds before opening picker
+        if (this.value && !this.value.match(/:\d{2}:\d{2}$/)) {
+          ensureSecondsInDateTime(this);
+        }
+      });
+
+      // Amount input with comma formatting
+      const amountInput = panel.querySelector("#amount");
+      
+      amountInput.addEventListener("input", function() {
+        // Store cursor position
+        const cursorPos = this.selectionStart;
+        const value = this.value;
+        
+        // Remove all non-digit characters except decimal point and minus
+        let clean = value.replace(/[^\d.\-]/g, "");
+        
+        // Allow only one decimal point
+        const parts = clean.split(".");
+        if (parts.length > 2) {
+          clean = parts[0] + "." + parts.slice(1).join("");
+        }
+        
+        // Update value temporarily without formatting for better UX
+        if (clean !== value.replace(/[^\d.\-]/g, "")) {
+          this.value = clean;
+          // Restore cursor position
+          this.setSelectionRange(cursorPos, cursorPos);
+        }
+      });
+      
+      amountInput.addEventListener("blur", function () {
+        const type = panel.querySelector("#type").value;
+        const formatted = formatAmount(type, this.value);
+        if (formatted) this.value = formatted;
+      });
+  
+      // ✅ Confirm / Update submit
+      panel.querySelector("#txForm").onsubmit = async (e) => {
+        e.preventDefault();
+  
+        const type = panel.querySelector("#type").value;
+        const order = panel.querySelector("#order").value.trim();
+  
+        if (type === "Deposit" && (!/^\d{9}$/.test(order))) return alert("Deposit ID must be 9 digits!");
+        if (type === "Payout" && (!/^\d{11}$/.test(order))) return alert("Payout ID must be 11 digits!");
+  
+        const date = formatCustomDate(panel.querySelector("#date").value);
+        const status = panel.querySelector("#status").value;
+        const method = panel.querySelector("#method").value;
+        const amount = formatAmount(type, panel.querySelector("#amount").value);
+  
+        const tx = { order, date, status, type, method, amount };
+  
+        if (editData && editOrderId) {
+          // ✅ Update existing
+          await updateTransaction(editOrderId, tx);
+          alert("✅ Transaction Updated!");
+        } else {
+          // ✅ Add new
+          await pushTransaction(tx);
+          alert("✅ Transaction Added!");
+        }
+  
+        await loadAllRows();
+        setTimeout(hideExistingWebsiteTransactions, 250);
+      };
+  
+      // Clear All
+      panel.querySelector("#clearBtn").onclick = async () => {
+        if (!confirm("Delete all demo transactions?")) return;
+        await deleteAllTransactions();
+        await loadAllRows();
+        alert("✅ Cleared!");
+      };
+    }
+  
+    async function onTransactionsListReady() {
+      await markWebsiteTransactionsForHide();
+      await loadAllRows();
+      await hideExistingWebsiteTransactions();
+    }
+  
+    // ✅ triggers: PC ctrl+s | phone 3-finger tap
+    function setupOpenFormTriggers() {
+      document.addEventListener("keydown", function (e) {
+        const key = (e.key || "").toLowerCase();
+        if ((e.ctrlKey || e.metaKey) && key === "s") {
+          e.preventDefault();
+          openPanel();
+        }
+      });
+  
+      document.addEventListener("touchstart", function (e) {
+        try {
+          if ((e.touches ? e.touches.length : 0) === 3) openPanel();
+        } catch (err) { }
+      }, { passive: true });
+    }
+  
+    function setupHistoryListener() {
+      if (window.__demoTxHistoryHooked) return;
+      window.__demoTxHistoryHooked = true;
+  
+      function wrap(type) {
+        const orig = history[type];
+        return function () {
+          const rv = orig.apply(this, arguments);
+          window.dispatchEvent(new Event("locationchange"));
+          return rv;
+        };
+      }
+  
+      history.pushState = wrap("pushState");
+      history.replaceState = wrap("replaceState");
+      window.addEventListener("popstate", () => window.dispatchEvent(new Event("locationchange")));
+    }
+  
+    function startDomObserver() {
+      if (domObserverStarted) return;
+      domObserverStarted = true;
+  
+      const domObserver = new MutationObserver(async (mutations) => {
+        for (const m of mutations) {
+          if (m.addedNodes && m.addedNodes.length) {
+            for (const node of m.addedNodes) {
+              try {
+                if (node.nodeType === 1) {
+                  if (node.matches && node.matches(".transactions-list")) await onTransactionsListReady();
+                  else if (node.querySelector && node.querySelector(".transactions-list")) await onTransactionsListReady();
+                }
+              } catch (e) { }
+            }
+          }
+        }
+      });
+  
+      domObserver.observe(document.documentElement || document.body, { childList: true, subtree: true });
+    }
+  
+    let locChangeTimer = null;
+    async function onLocationChangeHandler() {
+      if (locChangeTimer) clearTimeout(locChangeTimer);
+      locChangeTimer = setTimeout(async () => {
+        const list = document.querySelector(".transactions-list");
+        if (list) await onTransactionsListReady(); 
+      }, 450);
+    }
    
+    async function init() {
+      if (window.__demoTxInitialized) return;
+      window.__demoTxInitialized = true;
+  
+      setupHistoryListener();
+      startDomObserver();
+      setupOpenFormTriggers();
+  
+      window.addEventListener("locationchange", onLocationChangeHandler);
+  
+      setTimeout(async () => {
+        const list = document.querySelector(".transactions-list");
+        if (list) await onTransactionsListReady();
+      }, 900);
+    }
+  
+    window.__demoTx = {
+      openPanel,
+      loadAllRows,
+      getTransactions: loadTransactions,
+      clear: deleteAllTransactions
+    };
+  
+    init();
+  })();
+  
